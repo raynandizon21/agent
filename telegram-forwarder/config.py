@@ -11,8 +11,6 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 _TRUE = {"1", "true", "yes", "on", "y"}
 
 
@@ -80,6 +78,10 @@ class Config:
 
     @classmethod
     def load(cls) -> "Config":
+        # override=True so edits made while running (e.g. from the dashboard
+        # Settings page) are actually picked up on reload.
+        load_dotenv(override=True)
+
         forward_mode = (os.getenv("FORWARD_MODE", "forward") or "forward").strip().lower()
         if forward_mode not in {"forward", "copy"}:
             raise RuntimeError("FORWARD_MODE must be 'forward' or 'copy'")

@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import tempfile
 from collections import deque
 
+from dotenv import find_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
+
+from config import Config
 
 try:  # error classes differ slightly between Telethon versions
     from telethon.errors import ChatForwardsRestrictedError
@@ -38,6 +42,12 @@ class Forwarder:
         # Bounded de-dup memory: (chat_id, message_id) pairs already handled.
         self._seen: deque[tuple[int, int]] = deque(maxlen=5000)
         self._seen_set: set[tuple[int, int]] = set()
+        # Active event handler (callback, event-spec) so we can swap it on reload.
+        self._handler_cb = None
+        self._handler_spec = None
+        self._watch_task = None
+        self._env_path = find_dotenv(usecwd=True) or os.path.abspath(".env")
+        self._env_mtime = self._env_mtime_now()
 
     # ------------------------------------------------------------------ setup
     async def start(self) -> None:
@@ -51,36 +61,85 @@ class Forwarder:
         except Exception:  # pragma: no cover - non-fatal optimisation
             log.warning("Could not pre-load dialogs; entity resolution may be slower.")
 
+        self._register_handler()
+        self._watch_task = asyncio.create_task(self._watch_config())
+
+    # ---------------------------------------------------- handler (re)binding
+    def _register_handler(self) -> None:
+        if self._handler_cb is not None:
+            self.client.remove_event_handler(self._handler_cb, self._handler_spec)
+            self._handler_cb = self._handler_spec = None
+
         if self.config.discovery_mode:
             log.warning(
                 "DISCOVERY_MODE is ON: incoming messages are logged, nothing is forwarded."
             )
-            self.client.add_event_handler(
-                self._on_discovery, events.NewMessage(incoming=True)
+            self._handler_cb = self._on_discovery
+            self._handler_spec = events.NewMessage(incoming=True)
+        else:
+            sources = self.config.allowed_sources
+            if not sources:
+                raise RuntimeError(
+                    "No source configured. Set SOURCE_CHAT_ID (or SOURCE_WHITELIST), "
+                    "or enable DISCOVERY_MODE to find the chat id."
+                )
+            log.info(
+                "Forwarding NEW messages: from %s -> %s (mode=%s, own=%s)",
+                sources,
+                self.config.destination_group_id,
+                self.config.forward_mode,
+                self.config.forward_own,
             )
-            return
-
-        sources = self.config.allowed_sources
-        if not sources:
-            raise RuntimeError(
-                "No source configured. Set SOURCE_CHAT_ID (or SOURCE_WHITELIST) in .env, "
-                "or run with --list-dialogs / DISCOVERY_MODE=true to find the chat id."
+            self._handler_cb = self._on_message
+            # incoming only by default; both directions when FORWARD_OWN_MESSAGES=true
+            self._handler_spec = (
+                events.NewMessage(chats=sources)
+                if self.config.forward_own
+                else events.NewMessage(chats=sources, incoming=True)
             )
 
-        log.info(
-            "Forwarding NEW messages: from %s -> %s (mode=%s, own=%s)",
-            sources,
-            self.config.destination_group_id,
-            self.config.forward_mode,
-            self.config.forward_own,
-        )
-        # incoming only by default; both directions when FORWARD_OWN_MESSAGES=true
-        event_filter = (
-            events.NewMessage(chats=sources)
-            if self.config.forward_own
-            else events.NewMessage(chats=sources, incoming=True)
-        )
-        self.client.add_event_handler(self._on_message, event_filter)
+        self.client.add_event_handler(self._handler_cb, self._handler_spec)
+
+    # -------------------------------------------------- live config reload
+    def _env_mtime_now(self) -> float:
+        try:
+            return os.path.getmtime(self._env_path)
+        except OSError:
+            return 0.0
+
+    async def _watch_config(self) -> None:
+        """Poll the .env file; re-apply routing settings when it changes."""
+        while True:
+            await asyncio.sleep(5)
+            try:
+                mtime = self._env_mtime_now()
+                if mtime == self._env_mtime:
+                    continue
+                self._env_mtime = mtime
+
+                new_cfg = Config.load()
+                old_key = (
+                    self.config.discovery_mode,
+                    tuple(self.config.allowed_sources),
+                    self.config.forward_own,
+                )
+                new_key = (
+                    new_cfg.discovery_mode,
+                    tuple(new_cfg.allowed_sources),
+                    new_cfg.forward_own,
+                )
+                self.config = new_cfg
+                if old_key != new_key:
+                    log.info("Config file changed — re-registering handler.")
+                    self._register_handler()
+                else:
+                    log.info(
+                        "Config file changed — destination/mode updated (now -> %s, mode=%s).",
+                        new_cfg.destination_group_id,
+                        new_cfg.forward_mode,
+                    )
+            except Exception:
+                log.exception("Config reload failed; keeping previous settings.")
 
     # -------------------------------------------------------------- discovery
     async def _on_discovery(self, event) -> None:

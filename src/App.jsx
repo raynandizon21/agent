@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './AuthContext';
 import AgentsPage from './pages/AgentsPage';
 import InboxPage from './pages/InboxPage';
 import LoginPage from './pages/LoginPage';
+import SettingsPage from './pages/SettingsPage';
 import SettlementsPage from './pages/SettlementsPage';
 
 function Shell() {
@@ -25,6 +26,7 @@ function Shell() {
             Settlements
           </NavLink>
           <NavLink to="/messages">Messages</NavLink>
+          <NavLink to="/settings">Settings</NavLink>
           {/* <NavLink to="/agents">Agents</NavLink> */}
         </nav>
         <div className="sidebar-foot">
@@ -49,6 +51,7 @@ export default function App() {
         <Route element={<Shell />}>
           <Route path="/" element={<SettlementsPage />} />
           <Route path="/messages" element={<InboxPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settlements" element={<Navigate to="/" replace />} />
           <Route path="/agents" element={<AgentsPage />} />
         </Route>
