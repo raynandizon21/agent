@@ -359,6 +359,12 @@ tr:last-child td {
   text-transform: uppercase;
 }
 
+.badge.junket-infinitycage {
+  background: color-mix(in srgb, #46c9a8 28%, transparent);
+  color: #aef0e0;
+  text-transform: uppercase;
+}
+
 .badge.status-open {
   background: color-mix(in srgb, #c4a35a 25%, transparent);
   color: #e6d09a;

@@ -271,6 +271,87 @@ function parseDemoCage(text) {
   };
 }
 
+/**
+ * Infinity Cage — step-by-step like Demo Cage, but each label is bilingual
+ * (Korean + English, e.g. "계정 Account : ...") and colons have a leading space.
+ * Steps: Game Start -> Add Buy-in (repeatable) -> End Game. Sometimes a
+ * balance-check message.
+ */
+function infinityStep(text) {
+  const h = text.match(/\*([^*\n]{2,80})\*/);
+  const head = h ? h[1] : '';
+  if (/게임\s*종료|정산|End\s*Game/i.test(head)) return 'end';
+  if (/추가\s*바이인|Add\s*Buy-?in/i.test(head)) return 'addbuyin';
+  if (/캐시\s*아웃|Cash\s*-?\s*out/i.test(head)) return 'cashout';
+  if (/게임\s*시작|Game\s*Start/i.test(head)) return 'start';
+  if (/잔고\s*확인|Balance\s*Check/i.test(head)) return 'balance';
+  return null;
+}
+
+function parseInfinityCage(text) {
+  const marker =
+    /Infinity\s*Cage/i.test(text) ||
+    /계정\s*Account|게스트\s*Guest/i.test(text);
+  if (!marker) return null;
+
+  const step = infinityStep(text);
+  if (!step) return null;
+
+  const accountLine = firstMatch(text, [/(?:계정\s*)?Account\s*[:：]\s*([^\n]+)/i]);
+  const { account_no, player_name: acctSuffix } = parseAccountLine(accountLine);
+  const guest = firstMatch(text, [/(?:게스트\s*)?Guest\s*[:：]\s*([^\n]+)/i]);
+  const game_no = firstMatch(text, [/(?:게임\s*)?Game\s*#\s*[:：]?\s*(\d+)/i]);
+  if (!account_no || !game_no) return null;
+
+  const num = (patterns) => parseAmount(firstMatch(text, patterns));
+  const date = firstMatch(text, [
+    /(?:날짜\s*)?Date\s*[:：]\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})/i,
+  ]);
+  const time = firstMatch(text, [
+    /(?:시간\s*)?Time\s*[:：]\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\s*(?:AM|PM)?)/i,
+  ]);
+  const when = date ? new Date(`${date} ${time || ''}`.trim()) : null;
+  const settled_at = when && !Number.isNaN(when.getTime()) ? when : null;
+
+  const thisBuyIn = () =>
+    num([/(?<!Total\s)(?:바이인\s*)?Buy-?in\s*[:：]\s*([+\-0-9,\s]+)/i]);
+  const totalBuyIn = () =>
+    num([/(?:바이인\s*합계\s*)?Total\s*Buy-?in\s*[:：]\s*([+\-0-9,\s]+)/i]);
+
+  const fields = { settled_at };
+  if (step === 'start') {
+    fields.buy_in = thisBuyIn();
+  } else if (step === 'addbuyin') {
+    fields.buy_in = totalBuyIn() ?? thisBuyIn();
+  } else if (step === 'cashout') {
+    fields.cashout = num([
+      /(?:캐시아웃\s*합계\s*)?Total\s*Cashout\s*[:：]\s*([+\-0-9,\s]+)/i,
+      /Cashout\s*[:：]\s*([+\-0-9,\s]+)/i,
+    ]);
+  } else if (step === 'balance') {
+    fields.balance = num([
+      /(?:잔고\s*)?Balance\s*[:：]\s*([+\-0-9,\s]+)/i,
+      /잔고\s*[:：]\s*([+\-0-9,\s]+)/i,
+    ]);
+  } else if (step === 'end') {
+    fields.buy_in = totalBuyIn();
+    fields.cashout = num([/Total\s*Cashout\s*[:：]\s*([+\-0-9,\s]+)/i]);
+    fields.win_loss = num([/Win\s*\/?\s*Loss\s*[:：]\s*([+\-0-9,\s]+)/i]);
+    fields.rolling = num([/Total\s*Rolling\s*[:：]\s*([+\-0-9,\s]+)/i]);
+    fields.commission = num([/Commission\s*[:：]\s*([+\-0-9,\s]+)/i]);
+  }
+
+  return {
+    junket: 'infinitycage',
+    account_no,
+    player_name: guest || acctSuffix || null,
+    game_no,
+    step,
+    isFinal: step === 'end',
+    fields,
+  };
+}
+
 function cleanName(value) {
   if (!value) return null;
   const cleaned = String(value)
@@ -419,6 +500,11 @@ function amountsOk(parsed) {
  */
 export function parseSettlement(text) {
   if (!text || !String(text).trim()) return null;
+
+  const infinity = parseInfinityCage(text);
+  if (infinity) return infinity;
+  // Ours but the step header wasn't recognised — don't let Win9 mangle it.
+  if (/Infinity\s*Cage/i.test(text)) return null;
 
   const democage = parseDemoCage(text);
   if (democage) return democage;

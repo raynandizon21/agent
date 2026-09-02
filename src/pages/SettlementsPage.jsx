@@ -125,6 +125,7 @@ export default function SettlementsPage() {
             <option value="win9">Win9</option>
             <option value="galaxy">Galaxy</option>
             <option value="democage">Demo Cage</option>
+            <option value="infinitycage">Infinity Cage</option>
           </select>
           <input
             placeholder="Search account, player, game no…"

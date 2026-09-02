@@ -1,8 +1,22 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { createLogger, defineConfig } from 'vite'
+
+// A browser tab reconnecting to /ws without a valid token makes the upstream
+// drop the socket; Vite's http-proxy then prints an ECONNABORTED stack trace on
+// every retry. Those lines carry no signal here, so drop them from the logger.
+const logger = createLogger()
+const origError = logger.error
+logger.error = (msg, opts) => {
+  const s = typeof msg === 'string' ? msg : ''
+  if (s.includes('ws proxy') || s.includes('http proxy error') || s.includes('ECONNABORTED')) {
+    return
+  }
+  origError(msg, opts)
+}
 
 export default defineConfig({
   plugins: [react()],
+  customLogger: logger,
   server: {
     host: true,
     port: 6001,
