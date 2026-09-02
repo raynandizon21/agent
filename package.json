@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev:api\" \"npm run dev:web\"",
+    "dev": "concurrently -n api,web,fwd -c cyan,magenta,green \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:forwarder\"",
+    "dev:all": "npm run dev",
     "dev:api": "node --watch server/index.js",
     "dev:web": "vite",
+    "dev:forwarder": "node scripts/run-forwarder.mjs",
+    "setup:forwarder": "node scripts/setup-forwarder.mjs",
     "start": "node server/index.js",
     "build": "vite build",
     "preview": "vite preview"
