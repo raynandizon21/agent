@@ -68,15 +68,19 @@ class Forwarder:
             )
 
         log.info(
-            "Forwarding NEW incoming messages: from %s -> %s (mode=%s)",
+            "Forwarding NEW messages: from %s -> %s (mode=%s, own=%s)",
             sources,
             self.config.destination_group_id,
             self.config.forward_mode,
+            self.config.forward_own,
         )
-        self.client.add_event_handler(
-            self._on_message,
-            events.NewMessage(chats=sources, incoming=True),
+        # incoming only by default; both directions when FORWARD_OWN_MESSAGES=true
+        event_filter = (
+            events.NewMessage(chats=sources)
+            if self.config.forward_own
+            else events.NewMessage(chats=sources, incoming=True)
         )
+        self.client.add_event_handler(self._on_message, event_filter)
 
     # -------------------------------------------------------------- discovery
     async def _on_discovery(self, event) -> None:
@@ -109,8 +113,10 @@ class Forwarder:
     async def _on_message(self, event) -> None:
         msg = event.message
 
-        # ignore anything we sent ourselves
-        if event.out or (self._me and msg.sender_id == self._me.id):
+        # ignore our own messages unless FORWARD_OWN_MESSAGES=true
+        if not self.config.forward_own and (
+            event.out or (self._me and msg.sender_id == self._me.id)
+        ):
             return
         # loop guard: never re-forward out of the destination
         if event.chat_id == self.config.destination_group_id:

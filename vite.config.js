@@ -15,6 +15,15 @@ export default defineConfig({
         target: 'ws://127.0.0.1:6000',
         ws: true,
         changeOrigin: true,
+        // A browser tab reconnecting to /ws without a valid token makes the
+        // upstream drop the socket; http-proxy then spams ECONNABORTED/ECONNRESET
+        // stack traces. Swallow those specific transport errors quietly.
+        configure: (proxy) => {
+          const quiet = new Set(['ECONNABORTED', 'ECONNRESET', 'EPIPE'])
+          proxy.on('error', (err) => {
+            if (!quiet.has(err && err.code)) console.error('[ws proxy]', err.message)
+          })
+        },
       },
     },
   },

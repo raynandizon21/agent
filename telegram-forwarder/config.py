@@ -59,6 +59,7 @@ class Config:
     source_chat_id: int | None
     source_whitelist: list[int]
     forward_mode: str          # "forward" | "copy"
+    forward_own: bool          # also forward messages YOU send in the source chats
     discovery_mode: bool
     log_level: str
     log_file: str | None
@@ -92,6 +93,7 @@ class Config:
             source_chat_id=_get_int("SOURCE_CHAT_ID"),
             source_whitelist=_get_id_list("SOURCE_WHITELIST"),
             forward_mode=forward_mode,
+            forward_own=_get_bool("FORWARD_OWN_MESSAGES", False),
             discovery_mode=_get_bool("DISCOVERY_MODE", False),
             log_level=(os.getenv("LOG_LEVEL") or "INFO").strip().upper(),
             log_file=((os.getenv("LOG_FILE") or "").strip() or None),
