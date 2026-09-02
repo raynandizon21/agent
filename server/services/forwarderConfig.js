@@ -19,6 +19,10 @@ export const MANAGED_KEYS = [
   'DISCOVERY_MODE',
 ];
 
+// Credentials the UI may WRITE (never read back). Kept separate from
+// MANAGED_KEYS so routing reads can never accidentally include them.
+export const SECRET_KEYS = ['TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TELEGRAM_PHONE'];
+
 const DEFAULTS = {
   DESTINATION_GROUP_ID: '',
   SOURCE_CHAT_ID: '',
@@ -45,8 +49,40 @@ export function readForwarderConfig() {
   const values = { ...DEFAULTS };
   for (const k of MANAGED_KEYS) if (env[k] != null && env[k] !== '') values[k] = env[k];
   // presence only — never expose the secret values themselves
-  const hasCreds = Boolean(env.TELEGRAM_API_ID && env.TELEGRAM_API_HASH);
-  return { configured: true, hasCreds, values };
+  const secretsSet = {
+    TELEGRAM_API_ID: Boolean(env.TELEGRAM_API_ID),
+    TELEGRAM_API_HASH: Boolean(env.TELEGRAM_API_HASH),
+    TELEGRAM_PHONE: Boolean(env.TELEGRAM_PHONE),
+  };
+  const hasCreds = secretsSet.TELEGRAM_API_ID && secretsSet.TELEGRAM_API_HASH;
+  return { configured: true, hasCreds, secretsSet, values };
+}
+
+// Write only the credential keys that were actually supplied (non-empty).
+// A blank field means "keep the current value", so loading + saving the page
+// can never wipe a secret the UI could not display.
+export function writeForwarderSecrets(updates) {
+  const filtered = {};
+  for (const k of SECRET_KEYS) {
+    const v = updates[k];
+    if (v != null && String(v).trim() !== '') filtered[k] = String(v).trim();
+  }
+  if (Object.keys(filtered).length === 0) return;
+
+  let text = '';
+  if (existsSync(ENV_PATH)) text = readFileSync(ENV_PATH, 'utf8');
+  else if (existsSync(ENV_EXAMPLE)) text = readFileSync(ENV_EXAMPLE, 'utf8');
+
+  const lines = text.split(/\r?\n/);
+  for (const [key, val] of Object.entries(filtered)) {
+    const re = new RegExp(`^\\s*${key}\\s*=.*$`);
+    const idx = lines.findIndex((l) => re.test(l));
+    if (idx >= 0) lines[idx] = `${key}=${val}`;
+    else lines.push(`${key}=${val}`);
+  }
+  let out = lines.join('\n');
+  if (!out.endsWith('\n')) out += '\n';
+  writeFileSync(ENV_PATH, out, 'utf8');
 }
 
 export function writeForwarderConfig(updates) {

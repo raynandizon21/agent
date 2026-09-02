@@ -1,6 +1,7 @@
 import {
   readForwarderConfig,
   writeForwarderConfig,
+  writeForwarderSecrets,
 } from '../services/forwarderConfig.js';
 
 const isInt = (v) => /^-?\d+$/.test(String(v).trim());
@@ -44,6 +45,14 @@ export function updateConfig(req, res) {
     errors.push('Set a source chat ID or whitelist (or enable Discovery mode)');
   }
 
+  // Optional credentials — only validated/written when supplied (blank = keep).
+  const apiId = String(body.TELEGRAM_API_ID ?? '').trim();
+  const apiHash = String(body.TELEGRAM_API_HASH ?? '').trim();
+  const phone = String(body.TELEGRAM_PHONE ?? '').trim();
+  if (apiId && !isInt(apiId)) errors.push('API ID must be a number');
+  if (apiHash && !/^[0-9a-f]{32}$/i.test(apiHash)) errors.push('API hash must be 32 hex characters');
+  if (phone && !/^\+\d{6,15}$/.test(phone)) errors.push('Phone must be like +639171234567');
+
   if (errors.length) return res.status(400).json({ error: errors.join('; ') });
 
   try {
@@ -54,6 +63,11 @@ export function updateConfig(req, res) {
       FORWARD_MODE: mode,
       FORWARD_OWN_MESSAGES: own ? 'true' : 'false',
       DISCOVERY_MODE: discovery ? 'true' : 'false',
+    });
+    writeForwarderSecrets({
+      TELEGRAM_API_ID: apiId,
+      TELEGRAM_API_HASH: apiHash,
+      TELEGRAM_PHONE: phone,
     });
     return res.json({ ok: true, ...readForwarderConfig() });
   } catch (err) {

@@ -480,3 +480,22 @@ tr:last-child td {
 .settings-form button[type='submit'] {
   align-self: flex-start;
 }
+
+.settings-form fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin: 0;
+}
+
+.settings-form legend {
+  padding: 0 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}

@@ -10,11 +10,15 @@ const EMPTY = {
   DISCOVERY_MODE: 'false',
 };
 
+// Credentials are write-only: the server never returns their values.
+const EMPTY_CREDS = { TELEGRAM_API_ID: '', TELEGRAM_API_HASH: '', TELEGRAM_PHONE: '' };
+
 const isBool = (v) => v === true || v === 'true';
 
 export default function SettingsPage() {
   const [form, setForm] = useState(EMPTY);
-  const [meta, setMeta] = useState({ configured: true, hasCreds: true });
+  const [creds, setCreds] = useState(EMPTY_CREDS);
+  const [meta, setMeta] = useState({ configured: true, hasCreds: true, secretsSet: {} });
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
   const [busy, setBusy] = useState(false);
@@ -24,7 +28,12 @@ export default function SettingsPage() {
     try {
       const data = await api('/forwarder/config');
       setForm({ ...EMPTY, ...(data.values || {}) });
-      setMeta({ configured: !!data.configured, hasCreds: !!data.hasCreds });
+      setCreds(EMPTY_CREDS);
+      setMeta({
+        configured: !!data.configured,
+        hasCreds: !!data.hasCreds,
+        secretsSet: data.secretsSet || {},
+      });
     } catch (err) {
       setError(err.message || 'Failed to load settings');
     }
@@ -35,6 +44,7 @@ export default function SettingsPage() {
   }, []);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const setCred = (k, v) => setCreds((c) => ({ ...c, [k]: v }));
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -42,8 +52,11 @@ export default function SettingsPage() {
     setError('');
     setOk('');
     try {
-      await api('/forwarder/config', { method: 'PUT', body: JSON.stringify(form) });
-      setOk('Saved. The forwarder picks up changes automatically within a few seconds.');
+      await api('/forwarder/config', {
+        method: 'PUT',
+        body: JSON.stringify({ ...form, ...creds }),
+      });
+      setOk('Saved. The forwarder picks up routing changes automatically within a few seconds.');
       await load();
     } catch (err) {
       setError(err.message || 'Failed to save');
@@ -52,31 +65,76 @@ export default function SettingsPage() {
     }
   }
 
+  const credState = (k) => (meta.secretsSet[k] ? 'set' : 'not set');
+
   return (
     <section className="page">
       <header className="page-head">
         <div>
           <h1>Forwarder settings</h1>
           <p className="muted">
-            Routing for the Telegram forwarder. API credentials and login stay in
-            the one-time <code>npm run setup:forwarder</code>.
+            Routing and API credentials for the Telegram forwarder. After setting
+            the credentials, run <code>npm run setup:forwarder</code> once to
+            enter the login code (phone verification can't be done here).
           </p>
         </div>
       </header>
 
-      {!meta.configured ? (
+      {!meta.hasCreds ? (
         <p className="error">
-          <code>telegram-forwarder\.env</code> not found. Run{' '}
-          <code>npm run setup:forwarder</code> once, then reload this page.
-        </p>
-      ) : !meta.hasCreds ? (
-        <p className="error">
-          API credentials not set yet — run <code>npm run setup:forwarder</code>{' '}
-          to finish the Telegram login.
+          API credentials not set yet. Fill in API ID + API hash below, save, then
+          run <code>npm run setup:forwarder</code> for the one-time login code.
         </p>
       ) : null}
 
       <form className="settings-form" onSubmit={onSubmit}>
+        <fieldset>
+          <legend>Telegram API credentials</legend>
+          <label>
+            <span>API ID — {credState('TELEGRAM_API_ID')}</span>
+            <input
+              value={creds.TELEGRAM_API_ID}
+              onChange={(e) => setCred('TELEGRAM_API_ID', e.target.value)}
+              placeholder={
+                meta.secretsSet.TELEGRAM_API_ID
+                  ? 'leave blank to keep current'
+                  : 'from my.telegram.org, e.g. 31353680'
+              }
+              autoComplete="off"
+            />
+          </label>
+          <label>
+            <span>API hash — {credState('TELEGRAM_API_HASH')}</span>
+            <input
+              type="password"
+              value={creds.TELEGRAM_API_HASH}
+              onChange={(e) => setCred('TELEGRAM_API_HASH', e.target.value)}
+              placeholder={
+                meta.secretsSet.TELEGRAM_API_HASH
+                  ? 'leave blank to keep current'
+                  : '32 hex characters'
+              }
+              autoComplete="off"
+            />
+          </label>
+          <label>
+            <span>Phone — {credState('TELEGRAM_PHONE')}</span>
+            <input
+              value={creds.TELEGRAM_PHONE}
+              onChange={(e) => setCred('TELEGRAM_PHONE', e.target.value)}
+              placeholder={
+                meta.secretsSet.TELEGRAM_PHONE
+                  ? 'leave blank to keep current'
+                  : '+639171234567'
+              }
+              autoComplete="off"
+            />
+            <small className="muted">
+              Optional. If set, <code>setup:forwarder</code> won't ask for it.
+            </small>
+          </label>
+        </fieldset>
+
         <label>
           <span>Destination ID</span>
           <input
