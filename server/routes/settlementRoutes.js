@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { authMiddleware } from '../middleware/auth.js';
+import * as settlementController from '../controllers/settlementController.js';
+
+const router = Router();
+
+router.use(authMiddleware);
+router.get('/', settlementController.list);
+router.delete('/', settlementController.clear);
+
+export default router;
