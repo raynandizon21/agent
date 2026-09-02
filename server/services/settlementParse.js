@@ -272,74 +272,94 @@ function parseDemoCage(text) {
 }
 
 /**
- * Infinity Cage — step-by-step like Demo Cage, but each label is bilingual
- * (Korean + English, e.g. "계정 Account : ...") and colons have a leading space.
- * Steps: Game Start -> Add Buy-in (repeatable) -> End Game. Sometimes a
- * balance-check message.
+ * Infinity Cage (gamebook.js). Step-by-step per game, keyed by (account, game #).
+ * Labels are Korean-only ("바이인:") or bilingual ("바이인 Buy-in :"), colons may
+ * have a leading space, amounts may carry a " - 현금/계좌출금/…" payment-type tag.
+ * Split (multi-payment) messages add a 현금/계좌출금/크레딧 breakdown — those are
+ * ignored; the running total (바이인 합계 / 총 바이인 / 캐시아웃 합계) is used.
+ *
+ * Steps: start | addbuyin | cashout | end | delete. Service-payment and
+ * balance-check messages have no game # and are left unparsed (logged only).
  */
 function infinityStep(text) {
   const h = text.match(/\*([^*\n]{2,80})\*/);
-  const head = h ? h[1] : '';
-  if (/게임\s*종료|정산|End\s*Game/i.test(head)) return 'end';
-  if (/추가\s*바이인|Add\s*Buy-?in/i.test(head)) return 'addbuyin';
-  if (/캐시\s*아웃|Cash\s*-?\s*out/i.test(head)) return 'cashout';
-  if (/게임\s*시작|Game\s*Start/i.test(head)) return 'start';
-  if (/잔고\s*확인|Balance\s*Check/i.test(head)) return 'balance';
+  const head = h ? h[1].trim() : '';
+  if (head) {
+    if (/게임\s*삭제|Delete\s*Game/i.test(head)) return 'delete';
+    if (/게임\s*종료|정산|End\s*Game|Settlement/i.test(head)) return 'end';
+    if (/추가\s*바이인|Add\s*Buy-?in/i.test(head)) return 'addbuyin';
+    if (/중도\s*캐시\s*아웃|캐시\s*아웃|Cash-?\s*out/i.test(head)) return 'cashout';
+    if (/게임\s*시작|Game\s*Start/i.test(head)) return 'start';
+    return null; // 서비스 결제 / 잔고 확인 etc. — not a game settlement
+  }
+  // "Merge settlement" variant: no *header*, but carries the settlement totals.
+  if (/바이인\s*합계/.test(text) && /(?:윈\s*\/?\s*로스|Win\s*\/?\s*Loss)/i.test(text)) {
+    return 'end';
+  }
   return null;
 }
 
 function parseInfinityCage(text) {
-  const marker =
-    /Infinity\s*Cage/i.test(text) ||
-    /계정\s*Account|게스트\s*Guest/i.test(text);
-  if (!marker) return null;
+  if (!/Infinity\s*Cage/i.test(text) && !/계정\s*(?:Account)?\s*[:：]/i.test(text)) {
+    return null;
+  }
 
   const step = infinityStep(text);
   if (!step) return null;
 
-  const accountLine = firstMatch(text, [/(?:계정\s*)?Account\s*[:：]\s*([^\n]+)/i]);
-  const { account_no, player_name: acctSuffix } = parseAccountLine(accountLine);
-  const guest = firstMatch(text, [/(?:게스트\s*)?Guest\s*[:：]\s*([^\n]+)/i]);
-  const game_no = firstMatch(text, [/(?:게임\s*)?Game\s*#\s*[:：]?\s*(\d+)/i]);
+  const { account_no, player_name: acctSuffix } = parseAccountLine(
+    firstMatch(text, [/계정\s*(?:Account\s*)?[:：]\s*([^\n]+)/i])
+  );
+  const guest = firstMatch(text, [/게스트\s*(?:Guest\s*)?[:：]\s*([^\n]+)/i]);
+  const gameLine = firstMatch(text, [/게임\s*(?:Game\s*)?#\s*[:：]\s*([^\n]+)/i]);
+  const game_no = gameLine ? gameLine.split(/\s*-\s*/)[0].trim() : null;
   if (!account_no || !game_no) return null;
 
-  const num = (patterns) => parseAmount(firstMatch(text, patterns));
+  // value after a label, up to " - tag" or end of line
+  const num = (labels) =>
+    parseAmount(
+      firstMatch(
+        text,
+        labels.map((l) => new RegExp(`${l}\\s*[:：]\\s*(-?[\\d,]+)`, 'i'))
+      )
+    );
+
   const date = firstMatch(text, [
-    /(?:날짜\s*)?Date\s*[:：]\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})/i,
+    /날짜\s*(?:Date\s*)?[:：]\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})/i,
   ]);
   const time = firstMatch(text, [
-    /(?:시간\s*)?Time\s*[:：]\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\s*(?:AM|PM)?)/i,
+    /시간\s*(?:Time\s*)?[:：]\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\s*(?:AM|PM)?)/i,
   ]);
   const when = date ? new Date(`${date} ${time || ''}`.trim()) : null;
   const settled_at = when && !Number.isNaN(when.getTime()) ? when : null;
 
-  const thisBuyIn = () =>
-    num([/(?<!Total\s)(?:바이인\s*)?Buy-?in\s*[:：]\s*([+\-0-9,\s]+)/i]);
   const totalBuyIn = () =>
-    num([/(?:바이인\s*합계\s*)?Total\s*Buy-?in\s*[:：]\s*([+\-0-9,\s]+)/i]);
+    num(['(?:바이인\\s*합계|총\\s*바이인)(?:\\s*Total\\s*Buy-?in)?']);
+  const thisBuyIn = () => num(['바이인(?:\\s*Buy-?in)?']);
+  const totalCashout = () =>
+    num(['(?:캐시\\s*아웃\\s*합계|총\\s*캐시\\s*아웃)(?:\\s*Total\\s*Cashout)?']);
+  const thisCashout = () => num(['캐시\\s*아웃(?:\\s*Cash-?\\s*out)?']);
+  const balance = () => num(['잔고(?:\\s*Balance)?']);
 
   const fields = { settled_at };
   if (step === 'start') {
-    fields.buy_in = thisBuyIn();
+    fields.buy_in = totalBuyIn() ?? thisBuyIn();
+    fields.balance = balance();
   } else if (step === 'addbuyin') {
     fields.buy_in = totalBuyIn() ?? thisBuyIn();
+    fields.balance = balance();
   } else if (step === 'cashout') {
-    fields.cashout = num([
-      /(?:캐시아웃\s*합계\s*)?Total\s*Cashout\s*[:：]\s*([+\-0-9,\s]+)/i,
-      /Cashout\s*[:：]\s*([+\-0-9,\s]+)/i,
-    ]);
-  } else if (step === 'balance') {
-    fields.balance = num([
-      /(?:잔고\s*)?Balance\s*[:：]\s*([+\-0-9,\s]+)/i,
-      /잔고\s*[:：]\s*([+\-0-9,\s]+)/i,
-    ]);
+    fields.cashout = totalCashout() ?? thisCashout();
+    fields.balance = balance();
   } else if (step === 'end') {
     fields.buy_in = totalBuyIn();
-    fields.cashout = num([/Total\s*Cashout\s*[:：]\s*([+\-0-9,\s]+)/i]);
-    fields.win_loss = num([/Win\s*\/?\s*Loss\s*[:：]\s*([+\-0-9,\s]+)/i]);
-    fields.rolling = num([/Total\s*Rolling\s*[:：]\s*([+\-0-9,\s]+)/i]);
-    fields.commission = num([/Commission\s*[:：]\s*([+\-0-9,\s]+)/i]);
+    fields.cashout = totalCashout();
+    fields.win_loss = num(['(?:윈\\s*\\/?\\s*로스)(?:\\s*Win\\s*\\/?\\s*Loss)?']);
+    fields.rolling = num(['토탈\\s*롤링(?:\\s*Total\\s*Rolling)?']);
+    fields.commission = num(['커미션(?:\\s*Commission)?']);
+    fields.balance = balance();
   }
+  // step === 'delete' -> no fields; telegram.js removes the row
 
   return {
     junket: 'infinitycage',

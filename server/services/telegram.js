@@ -178,7 +178,13 @@ async function saveIncomingMessage(msg) {
 
   try {
     const parsed = parseSettlement(text);
-    if (parsed && parsed.step) {
+    if (parsed && parsed.step === 'delete') {
+      await settlementModel.deleteGame(parsed);
+      console.log(
+        `[telegram] ${parsed.junket} delete account=${parsed.account_no} game=${parsed.game_no}`
+      );
+      bus.emit(Events.SETTLEMENT, { messageId, agentId, junket: parsed.junket, step: 'delete' });
+    } else if (parsed && parsed.step) {
       // Step-by-step game: merge into the open row for this account+game#.
       await settlementModel.upsertStep(parsed, { messageId, agentId, raw_text: text });
       console.log(

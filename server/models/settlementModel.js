@@ -181,6 +181,16 @@ export async function upsertStep(
   return result.insertId;
 }
 
+// Remove the row for one game (e.g. Infinity Cage "게임삭제 / Delete Game").
+export async function deleteGame({ junket, account_no, game_no }) {
+  const result = await query(
+    `DELETE FROM settlements
+     WHERE junket = :junket AND account_no = :account_no AND game_no = :game_no`,
+    { junket, account_no, game_no }
+  );
+  return result.affectedRows || 0;
+}
+
 export async function deleteAll() {
   // "Clear data" wipes everything: settlements AND the message log they came
   // from. FK checks off so order doesn't matter; AUTO_INCREMENT resets.
