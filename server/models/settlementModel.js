@@ -235,16 +235,19 @@ export async function deleteGame({ junket, account_no, game_no }) {
   return result.affectedRows || 0;
 }
 
-// Recomputes COMMISSION = ROUND(BUY_IN * rate / 100) on every existing
+// Recomputes COMMISSION = ROUND(ROLLING * rate / 100) on every existing
 // settlement row for one (junket, account_no) — used when a guest's linked
 // account gets a commission rate saved on the Guests page, so past and
-// current games for that account reflect the new rate immediately. Rows
-// with no BUY_IN are left untouched (nothing to compute from).
+// current games for that account reflect the new rate immediately. Junket
+// commission is rolling-based (a % of turnover), not buy-in-based — verified
+// against Infinity Cage's own account panel, where the same commission/rolling
+// ratio matches its displayed RATE exactly. Rows with no ROLLING are left
+// untouched (nothing to compute from).
 export async function recomputeCommission({ junket, account_no, rate }) {
   const result = await query(
     `UPDATE settlements
-        SET COMMISSION = ROUND(BUY_IN * :rate / 100)
-      WHERE JUNKET = :junket AND ACCOUNT_NO = :account_no AND BUY_IN IS NOT NULL`,
+        SET COMMISSION = ROUND(ROLLING * :rate / 100)
+      WHERE JUNKET = :junket AND ACCOUNT_NO = :account_no AND ROLLING IS NOT NULL`,
     { junket, account_no, rate }
   );
   return result.affectedRows || 0;
@@ -306,7 +309,7 @@ export async function listByAccounts(pairs, { agentId = null } = {}) {
       s.BUY_IN AS buy_in, s.CASHOUT AS cashout, s.WIN_LOSS AS win_loss,
       s.ROLLING AS rolling, s.COMMISSION AS commission, s.BALANCE AS balance,
       s.SETTLED_AT AS settled_at, s.STATUS AS status, s.STEP AS step,
-      s.CREATED_AT AS created_at
+      s.CREATED_AT AS created_at, s.RAW_TEXT AS raw_text
     FROM settlements s
     LEFT JOIN agents a ON a.IDNo = s.AGENT_ID
     WHERE (${orClauses.join(' OR ')})
@@ -343,7 +346,8 @@ export async function list({ limit = 100, q = '', junket = '', agentId = null } 
       s.SETTLED_AT AS settled_at,
       s.STATUS AS status,
       s.STEP AS step,
-      s.CREATED_AT AS created_at
+      s.CREATED_AT AS created_at,
+      s.RAW_TEXT AS raw_text
     FROM settlements s
     LEFT JOIN agents a ON a.IDNo = s.AGENT_ID
     WHERE 1=1

@@ -1,6 +1,7 @@
 import * as guestModel from '../models/guestModel.js';
 import * as settlementModel from '../models/settlementModel.js';
 import { bus, Events } from '../services/events.js';
+import { parseSettlement } from '../services/settlementParse.js';
 
 const KNOWN_JUNKETS = ['win9', 'galaxy', 'democage', 'infinity'];
 
@@ -78,6 +79,27 @@ export async function settlements(req, res) {
     const agentId = req.user?.agentId ?? null;
     const junkets = await guestModel.getJunketLinks(id);
     const settlements = await settlementModel.listByAccounts(junkets, { agentId });
+
+    // COMMISSION gets overwritten in place whenever a custom commission_rate
+    // is saved for a linked account (see recomputeForJunkets below), so the
+    // rate the junket itself originally applied isn't stored anywhere. Best
+    // we can do is re-derive it from the raw settlement message. Junket
+    // commission is rolling-based (a % of turnover), not buy-in-based —
+    // verified against Infinity Cage's own account panel, where the same
+    // commission/rolling ratio matches its displayed RATE exactly.
+    for (const s of settlements) {
+      // parseSettlement's return shape isn't consistent across junkets —
+      // Infinity/Win9/DemoCage nest values under `.fields`, Galaxy returns
+      // them flat — so check both.
+      const original = parseSettlement(s.raw_text);
+      const originalFields = original ? original.fields ?? original : null;
+      const originalCommission = originalFields?.commission ?? null;
+      const originalRolling = originalFields?.rolling ?? s.rolling ?? null;
+      s.original_commission = originalCommission;
+      s.game_rate =
+        originalCommission != null && originalRolling ? (originalCommission / originalRolling) * 100 : null;
+      delete s.raw_text;
+    }
 
     return res.json({ junkets, settlements });
   } catch (err) {

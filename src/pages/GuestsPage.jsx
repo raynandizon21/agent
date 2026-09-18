@@ -1,4 +1,4 @@
-import { Check, Edit2, Gamepad2, Loader2, Plus, Power, Search, Trash2, Users, X } from 'lucide-react';
+import { Calculator, Check, Edit2, Gamepad2, Loader2, Plus, Power, Search, Trash2, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ConfirmDialog from '../ConfirmDialog';
@@ -9,6 +9,13 @@ function formatAmount(value) {
   const n = Number(value);
   if (Number.isNaN(n)) return String(value);
   return n.toLocaleString();
+}
+
+function formatRate(value) {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  if (Number.isNaN(n)) return '—';
+  return `${n.toFixed(2)}%`;
 }
 
 const PAGE_SIZE = 20;
@@ -130,12 +137,14 @@ export default function GuestsPage() {
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [recordsError, setRecordsError] = useState('');
   const [recordsJunketFilter, setRecordsJunketFilter] = useState('');
+  const [showOriginal, setShowOriginal] = useState(false);
 
   async function openView(g) {
     setViewingGuest(g);
     setRecords([]);
     setRecordsError('');
     setRecordsJunketFilter('');
+    setShowOriginal(false);
     setRecordsLoading(true);
     try {
       const data = await api(`/guests/${g.id}/settlements`);
@@ -335,6 +344,29 @@ export default function GuestsPage() {
       ),
     [visibleRecords]
   );
+  const originalTotals = useMemo(
+    () =>
+      visibleRecords.reduce(
+        (acc, r) => ({
+          rolling: acc.rolling + (Number(r.rolling) || 0),
+          commission: acc.commission + (Number(r.original_commission) || 0),
+        }),
+        { rolling: 0, commission: 0 }
+      ),
+    [visibleRecords]
+  );
+  // Junket commission is rolling-based (a % of turnover), not buy-in-based.
+  const overallGameRate = originalTotals.rolling ? (originalTotals.commission / originalTotals.rolling) * 100 : null;
+  // The Game Records table shows each linked account's own custom commission
+  // rate (the same rate shown in its badge above), not the rolling-derived
+  // original rate — that one only shows in the Original Data popup.
+  const customRateByAccount = useMemo(() => {
+    const map = new Map();
+    for (const j of viewingGuest?.junkets || []) {
+      if (j.account_no) map.set(`${j.junket}:${j.account_no}`, j.commission_rate);
+    }
+    return map;
+  }, [viewingGuest]);
 
   return (
     <div className="space-y-3">
@@ -409,7 +441,7 @@ export default function GuestsPage() {
                 <th className="py-2.5 px-3 whitespace-nowrap">AGENT</th>
                 <th className="py-2.5 px-3 whitespace-nowrap">TELEGRAM ID</th>
                 <th className="py-2.5 px-3 whitespace-nowrap">JUNKETS</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">ACTIVE</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">STATUS</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">ACTIONS</th>
               </tr>
             </thead>
@@ -473,10 +505,10 @@ export default function GuestsPage() {
                           className={`text-[13px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm border ${
                             g.active
                               ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
-                              : 'bg-slate-800 text-slate-400 border-slate-700'
+                              : 'bg-rose-500/10 text-rose-300 border-rose-500/20'
                           }`}
                         >
-                          {g.active ? 'Yes' : 'No'}
+                          {g.active ? 'Active' : 'Deactivated'}
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
@@ -640,9 +672,9 @@ export default function GuestsPage() {
                 <span className="text-slate-200">{viewingGuest.agent_name || 'Unassigned'}</span>
               </div>
               <div>
-                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Active</span>
-                <span className={viewingGuest.active ? 'text-emerald-400' : 'text-slate-400'}>
-                  {viewingGuest.active ? 'Yes' : 'No'}
+                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Status</span>
+                <span className={viewingGuest.active ? 'text-emerald-400' : 'text-rose-400'}>
+                  {viewingGuest.active ? 'Active' : 'Deactivated'}
                 </span>
               </div>
             </div>
@@ -675,23 +707,36 @@ export default function GuestsPage() {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
                 <span className="text-[11px] uppercase font-semibold text-slate-500">Game Records</span>
-                {recordJunkets.length > 1 ? (
-                  <select
-                    value={recordsJunketFilter}
-                    onChange={(e) => setRecordsJunketFilter(e.target.value)}
-                    aria-label="Filter game records by junket"
-                    className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[13px] text-slate-300 focus:outline-hidden cursor-pointer"
-                  >
-                    <option value="">All junkets</option>
-                    {recordJunkets.map((j) => (
-                      <option key={j.value} value={j.value}>
-                        {j.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
+                <div className="flex items-center gap-1.5">
+                  {records.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowOriginal(true)}
+                      title="Original commission and game rate, derived from the raw settlement message — ignores any custom rate set on this guest's linked account"
+                      className="flex items-center gap-1 px-2 py-1 text-[13px] font-semibold text-blue-300 hover:text-white bg-blue-500/10 hover:bg-blue-600 rounded-md border border-blue-500/20 transition cursor-pointer"
+                    >
+                      <Calculator className="w-3.5 h-3.5" />
+                      Original data
+                    </button>
+                  ) : null}
+                  {recordJunkets.length > 1 ? (
+                    <select
+                      value={recordsJunketFilter}
+                      onChange={(e) => setRecordsJunketFilter(e.target.value)}
+                      aria-label="Filter game records by junket"
+                      className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[13px] text-slate-300 focus:outline-hidden cursor-pointer"
+                    >
+                      <option value="">All junkets</option>
+                      {recordJunkets.map((j) => (
+                        <option key={j.value} value={j.value}>
+                          {j.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                </div>
               </div>
 
               {recordsError ? <p className="text-rose-400 text-sm">{recordsError}</p> : null}
@@ -722,6 +767,7 @@ export default function GuestsPage() {
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">BUY-IN</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">CASHOUT</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">ROLLING</th>
+                        <th className="py-2 px-2.5 text-right whitespace-nowrap">GAME RATE</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">COMMISSION</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">WIN/LOSS</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">BALANCE</th>
@@ -782,6 +828,9 @@ export default function GuestsPage() {
                           <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100">
                             {formatAmount(r.rolling)}
                           </td>
+                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-300 font-mono-num">
+                            {formatRate(customRateByAccount.get(`${r.junket}:${r.account_no}`))}
+                          </td>
                           <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-amber-400">
                             {formatAmount(r.commission)}
                           </td>
@@ -812,6 +861,7 @@ export default function GuestsPage() {
                         <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
                           {formatAmount(recordsTotals.rolling)}
                         </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap"></td>
                         <td className="py-2 px-2.5 text-right whitespace-nowrap text-amber-400">
                           {formatAmount(recordsTotals.commission)}
                         </td>
@@ -843,6 +893,162 @@ export default function GuestsPage() {
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      <Modal
+        open={showOriginal}
+        onClose={() => setShowOriginal(false)}
+        title="Original Data — no custom rate"
+        icon={Calculator}
+        maxWidth="max-w-7xl"
+      >
+        <div className="space-y-3 text-sm">
+          <p className="text-[13px] text-slate-400">
+            Commission below is re-derived from each settlement's raw message, ignoring any custom commission
+            rate saved on this guest's linked account. Game rate = original commission ÷ rolling.
+          </p>
+
+          {visibleRecords.length === 0 ? (
+            <div className="p-6 text-center rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+              <Calculator className="w-5 h-5 text-slate-600 mx-auto" />
+              <p className="text-slate-500 text-sm">No game records to compute.</p>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-slate-800 overflow-auto max-h-96">
+              <table className="w-full text-left text-[13px] border-collapse">
+                <thead className="sticky top-0">
+                  <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 text-[11px] font-bold">
+                    <th className="py-2 px-2.5 whitespace-nowrap">DATE</th>
+                    <th className="py-2 px-2.5 whitespace-nowrap">STATUS</th>
+                    <th className="py-2 px-2.5 whitespace-nowrap">JUNKET</th>
+                    <th className="py-2 px-2.5 whitespace-nowrap">GAME NO.</th>
+                    <th className="py-2 px-2.5 whitespace-nowrap">ACCOUNT NO.</th>
+                    <th className="py-2 px-2.5">PLAYER NAME</th>
+                    <th className="py-2 px-2.5 whitespace-nowrap">AGENT</th>
+                    <th className="py-2 px-2.5 text-right whitespace-nowrap">BUY-IN</th>
+                    <th className="py-2 px-2.5 text-right whitespace-nowrap">CASHOUT</th>
+                    <th className="py-2 px-2.5 text-right whitespace-nowrap">ROLLING</th>
+                    <th className="py-2 px-2.5 text-right whitespace-nowrap">GAME RATE</th>
+                    <th className="py-2 px-2.5 text-right whitespace-nowrap">ORIGINAL COMMISSION</th>
+                    <th className="py-2 px-2.5 text-right whitespace-nowrap">WIN/LOSS</th>
+                    <th className="py-2 px-2.5 text-right whitespace-nowrap">BALANCE</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 bg-slate-900">
+                  {visibleRecords.map((r) => {
+                    const meta = JUNKETS.find((jj) => jj.value === r.junket);
+                    return (
+                      <tr key={r.id} className="hover:bg-slate-800/40 transition">
+                        <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-400">
+                          {r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="py-2 px-2.5 whitespace-nowrap">
+                          <span
+                            className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded border ${
+                              r.status === 'open'
+                                ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+                                : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                            }`}
+                          >
+                            {r.status === 'open' ? r.step || 'open' : 'settled'}
+                          </span>
+                        </td>
+                        <td className="py-2 px-2.5 whitespace-nowrap">
+                          <span
+                            className={`inline-block uppercase font-bold text-[11px] px-1.5 py-0.5 rounded border ${
+                              meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            {r.junket}
+                          </span>
+                        </td>
+                        <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-300">
+                          {r.game_no || '—'}
+                        </td>
+                        <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-300">
+                          {r.account_no || '—'}
+                        </td>
+                        <td className="py-2 px-2.5 text-slate-200 truncate max-w-[180px]" title={r.player_name || ''}>
+                          {r.player_name || '—'}
+                        </td>
+                        <td className="py-2 px-2.5 whitespace-nowrap text-slate-200">
+                          {r.agent_name || '—'}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
+                          {formatAmount(r.buy_in)}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
+                          {formatAmount(r.cashout)}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100">
+                          {formatAmount(r.rolling)}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100 font-mono-num">
+                          {formatRate(r.game_rate)}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-amber-400">
+                          {formatAmount(r.original_commission)}
+                        </td>
+                        <td
+                          className={`py-2 px-2.5 text-right whitespace-nowrap font-bold ${
+                            Number(r.win_loss) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
+                        >
+                          {formatAmount(r.win_loss)}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200 font-mono-num">
+                          {formatAmount(r.balance)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="sticky bottom-0">
+                  <tr className="border-t border-slate-700 bg-slate-950 font-bold">
+                    <td className="py-2 px-2.5 whitespace-nowrap text-slate-400" colSpan={7}>
+                      GRAND TOTAL
+                    </td>
+                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
+                      {formatAmount(recordsTotals.buy_in)}
+                    </td>
+                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
+                      {formatAmount(recordsTotals.cashout)}
+                    </td>
+                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
+                      {formatAmount(recordsTotals.rolling)}
+                    </td>
+                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100 font-mono-num">
+                      {formatRate(overallGameRate)}
+                    </td>
+                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-amber-400">
+                      {formatAmount(originalTotals.commission)}
+                    </td>
+                    <td
+                      className={`py-2 px-2.5 text-right whitespace-nowrap ${
+                        recordsTotals.win_loss >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                      }`}
+                    >
+                      {formatAmount(recordsTotals.win_loss)}
+                    </td>
+                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100 font-mono-num">
+                      {formatAmount(recordsTotals.balance)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end pt-2 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={() => setShowOriginal(false)}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-sm font-medium cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <ConfirmDialog

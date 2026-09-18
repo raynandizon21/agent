@@ -28,6 +28,13 @@ function formatAmount(value) {
   return n.toLocaleString();
 }
 
+function formatRate(value) {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  if (Number.isNaN(n)) return '—';
+  return `${n.toFixed(2)}%`;
+}
+
 function sumField(rows, key) {
   return rows.reduce((sum, row) => {
     const n = Number(row[key]);
@@ -263,20 +270,20 @@ export default function SettlementsPage() {
           <h3 className="text-base font-semibold text-slate-300">No settlements yet.</h3>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg bg-slate-900 border border-slate-800 shadow-xs">
-          <table className="w-full text-left text-sm border-collapse min-w-[1100px]">
-            <thead className="bg-slate-950 text-slate-400 uppercase text-[13px] font-bold tracking-wider border-b border-slate-800 select-none sticky top-0 z-10">
+        <div className="rounded-lg bg-slate-900 border border-slate-800 shadow-xs">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead className="bg-slate-950 text-slate-400 uppercase text-[13px] font-bold tracking-wider border-b border-slate-800 select-none">
               <tr>
                 <th className="py-2.5 px-3 whitespace-nowrap">Date</th>
                 <th className="py-2.5 px-2.5 whitespace-nowrap">Status</th>
                 <th className="py-2.5 px-2.5 whitespace-nowrap">Junket</th>
                 <th className="py-2.5 px-2.5 whitespace-nowrap">Game No.</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">Account No.</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">Player Name</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Account / Player</th>
                 <th className="py-2.5 px-3 whitespace-nowrap">Agent</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Buy-in</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Cashout</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Rolling</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap">Game Rate</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Commission</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Win/Loss</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Balance</th>
@@ -312,14 +319,13 @@ export default function SettlementsPage() {
                     </span>
                   </td>
                   <td className="py-2.5 px-2.5 whitespace-nowrap font-mono-num text-slate-300">{s.game_no || '—'}</td>
-                  <td className="py-2.5 px-3 whitespace-nowrap font-sans">
-                    <div className="font-bold text-white font-mono-num text-sm">{s.account_no || '—'}</div>
-                    {s.account_name ? (
-                      <div className="text-[14px] text-slate-400 mt-0.5">{s.account_name}</div>
-                    ) : null}
-                  </td>
-                  <td className="py-2.5 px-3 whitespace-nowrap font-sans text-slate-200">
-                    {s.player_name || '—'}
+                  <td className="py-2.5 px-3 font-sans max-w-[220px]">
+                    <div className="font-bold text-white font-mono-num text-sm whitespace-nowrap">
+                      {s.account_no || '—'}
+                    </div>
+                    <div className="text-[14px] text-slate-400 mt-0.5 break-words">
+                      {[s.account_name, s.player_name].filter(Boolean).join(' · ') || '—'}
+                    </div>
                   </td>
                   <td className="py-2.5 px-3 whitespace-nowrap font-sans">
                     {s.agent_name ? (
@@ -338,6 +344,9 @@ export default function SettlementsPage() {
                   </td>
                   <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-100">
                     {formatAmount(s.rolling)}
+                  </td>
+                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-300 font-mono-num">
+                    {formatRate(s.game_rate)}
                   </td>
                   <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-amber-400">
                     {formatAmount(s.commission)}
@@ -359,12 +368,13 @@ export default function SettlementsPage() {
             {rows.length > 0 ? (
               <tfoot>
                 <tr className="border-t border-slate-800 bg-slate-950/70 font-bold">
-                  <td colSpan={7} className="py-3 px-3 text-slate-300">
+                  <td colSpan={6} className="py-3 px-3 text-slate-300">
                     Total
                   </td>
                   <td className="py-3 px-3 text-right text-slate-100">{formatAmount(totals.buy_in)}</td>
                   <td className="py-3 px-3 text-right text-slate-100">{formatAmount(totals.cashout)}</td>
                   <td className="py-3 px-3 text-right text-slate-100">{formatAmount(totals.rolling)}</td>
+                  <td className="py-3 px-3"></td>
                   <td className="py-3 px-3 text-right text-amber-400">{formatAmount(totals.commission)}</td>
                   <td
                     className={`py-3 px-3 text-right ${

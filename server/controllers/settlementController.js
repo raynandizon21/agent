@@ -1,5 +1,6 @@
 import * as settlementModel from '../models/settlementModel.js';
 import { bus, Events } from '../services/events.js';
+import { parseSettlement } from '../services/settlementParse.js';
 
 export async function list(req, res) {
   try {
@@ -8,6 +9,29 @@ export async function list(req, res) {
     const junket = String(req.query.junket || '').trim().toLowerCase();
     const agentId = req.user?.agentId ?? null;
     const settlements = await settlementModel.list({ limit, q, junket, agentId });
+
+    // GAME RATE only makes sense once a game is settled — an open/in-progress
+    // game's rolling/commission can still change, so leave it unset until then.
+    // Same re-derivation as the guest settlements view: COMMISSION may have
+    // been overwritten by a guest's custom commission_rate, so the junket's
+    // actual original rate has to come from re-parsing the raw message. Junket
+    // commission is rolling-based (a % of turnover), not buy-in-based —
+    // verified against Infinity Cage's own account panel, where the same
+    // commission/rolling ratio matches its displayed RATE exactly.
+    for (const s of settlements) {
+      if (s.status === 'settled') {
+        const original = parseSettlement(s.raw_text);
+        const originalFields = original ? original.fields ?? original : null;
+        const originalCommission = originalFields?.commission ?? null;
+        const originalRolling = originalFields?.rolling ?? s.rolling ?? null;
+        s.game_rate =
+          originalCommission != null && originalRolling ? (originalCommission / originalRolling) * 100 : null;
+      } else {
+        s.game_rate = null;
+      }
+      delete s.raw_text;
+    }
+
     return res.json({ settlements });
   } catch (err) {
     console.error('settlements error', err);
