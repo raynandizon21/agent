@@ -5,7 +5,7 @@ import * as messageController from '../controllers/messageController.js';
 const router = Router();
 
 router.use(authMiddleware);
-router.get('/', messageController.list);
+router.get('/', requireAdmin, messageController.list);
 router.delete('/', requireAdmin, messageController.clear);
 
 export default router;

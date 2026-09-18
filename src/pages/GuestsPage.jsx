@@ -65,7 +65,7 @@ function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) 
                       )
                     )
                   }
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 font-mono-num focus:outline-hidden"
+                  className="flex-1 min-w-0 w-0 truncate bg-slate-950 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 font-mono-num focus:outline-hidden"
                 >
                   <option value="">Select account…</option>
                   {options.map((a) => (
@@ -129,11 +129,13 @@ export default function GuestsPage() {
   const [records, setRecords] = useState([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [recordsError, setRecordsError] = useState('');
+  const [recordsJunketFilter, setRecordsJunketFilter] = useState('');
 
   async function openView(g) {
     setViewingGuest(g);
     setRecords([]);
     setRecordsError('');
+    setRecordsJunketFilter('');
     setRecordsLoading(true);
     try {
       const data = await api(`/guests/${g.id}/settlements`);
@@ -310,6 +312,29 @@ export default function GuestsPage() {
 
   const inputClass =
     'w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-hidden focus:border-blue-500 text-sm';
+
+  const recordJunkets = useMemo(
+    () => JUNKETS.filter((j) => records.some((r) => r.junket === j.value)),
+    [records]
+  );
+  const visibleRecords = recordsJunketFilter
+    ? records.filter((r) => r.junket === recordsJunketFilter)
+    : records;
+  const recordsTotals = useMemo(
+    () =>
+      visibleRecords.reduce(
+        (acc, r) => ({
+          buy_in: acc.buy_in + (Number(r.buy_in) || 0),
+          cashout: acc.cashout + (Number(r.cashout) || 0),
+          rolling: acc.rolling + (Number(r.rolling) || 0),
+          commission: acc.commission + (Number(r.commission) || 0),
+          win_loss: acc.win_loss + (Number(r.win_loss) || 0),
+          balance: acc.balance + (Number(r.balance) || 0),
+        }),
+        { buy_in: 0, cashout: 0, rolling: 0, commission: 0, win_loss: 0, balance: 0 }
+      ),
+    [visibleRecords]
+  );
 
   return (
     <div className="space-y-3">
@@ -597,7 +622,7 @@ export default function GuestsPage() {
         onClose={() => setViewingGuest(null)}
         title={viewingGuest ? `${viewingGuest.guest_name} — Game Records` : ''}
         icon={Gamepad2}
-        maxWidth="max-w-6xl"
+        maxWidth="max-w-7xl"
       >
         {viewingGuest ? (
           <div className="space-y-3 text-sm">
@@ -650,20 +675,41 @@ export default function GuestsPage() {
             </div>
 
             <div>
-              <span className="text-[11px] uppercase font-semibold text-slate-500 block mb-1.5">Game Records</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] uppercase font-semibold text-slate-500">Game Records</span>
+                {recordJunkets.length > 1 ? (
+                  <select
+                    value={recordsJunketFilter}
+                    onChange={(e) => setRecordsJunketFilter(e.target.value)}
+                    aria-label="Filter game records by junket"
+                    className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[13px] text-slate-300 focus:outline-hidden cursor-pointer"
+                  >
+                    <option value="">All junkets</option>
+                    {recordJunkets.map((j) => (
+                      <option key={j.value} value={j.value}>
+                        {j.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
 
               {recordsError ? <p className="text-rose-400 text-sm">{recordsError}</p> : null}
 
               {recordsLoading ? (
                 <p className="text-slate-400 text-sm">Loading…</p>
-              ) : records.length === 0 ? (
+              ) : visibleRecords.length === 0 ? (
                 <div className="p-6 text-center rounded-lg bg-slate-950 border border-slate-800 space-y-1">
                   <Gamepad2 className="w-5 h-5 text-slate-600 mx-auto" />
-                  <p className="text-slate-500 text-sm">No game records yet for this guest's linked accounts.</p>
+                  <p className="text-slate-500 text-sm">
+                    {records.length === 0
+                      ? "No game records yet for this guest's linked accounts."
+                      : 'No game records for this junket.'}
+                  </p>
                 </div>
               ) : (
                 <div className="rounded-lg border border-slate-800 overflow-auto max-h-80">
-                  <table className="w-full text-left text-[13px] border-collapse min-w-[1100px]">
+                  <table className="w-full text-left text-[13px] border-collapse">
                     <thead className="sticky top-0">
                       <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 text-[11px] font-bold">
                         <th className="py-2 px-2.5 whitespace-nowrap">DATE</th>
@@ -671,7 +717,7 @@ export default function GuestsPage() {
                         <th className="py-2 px-2.5 whitespace-nowrap">JUNKET</th>
                         <th className="py-2 px-2.5 whitespace-nowrap">GAME NO.</th>
                         <th className="py-2 px-2.5 whitespace-nowrap">ACCOUNT NO.</th>
-                        <th className="py-2 px-2.5 whitespace-nowrap">PLAYER NAME</th>
+                        <th className="py-2 px-2.5">PLAYER NAME</th>
                         <th className="py-2 px-2.5 whitespace-nowrap">AGENT</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">BUY-IN</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">CASHOUT</th>
@@ -682,7 +728,7 @@ export default function GuestsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 bg-slate-900">
-                      {records.map((r) => (
+                      {visibleRecords.map((r) => (
                         <tr key={r.id} className="hover:bg-slate-800/40 transition">
                           <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-400">
                             {r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}
@@ -698,8 +744,19 @@ export default function GuestsPage() {
                               {r.status === 'open' ? r.step || 'open' : 'settled'}
                             </span>
                           </td>
-                          <td className="py-2 px-2.5 whitespace-nowrap uppercase font-bold text-[11px] text-slate-300">
-                            {r.junket}
+                          <td className="py-2 px-2.5 whitespace-nowrap">
+                            {(() => {
+                              const meta = JUNKETS.find((jj) => jj.value === r.junket);
+                              return (
+                                <span
+                                  className={`inline-block uppercase font-bold text-[11px] px-1.5 py-0.5 rounded border ${
+                                    meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
+                                  }`}
+                                >
+                                  {r.junket}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-300">
                             {r.game_no || '—'}
@@ -707,7 +764,10 @@ export default function GuestsPage() {
                           <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-300">
                             {r.account_no || '—'}
                           </td>
-                          <td className="py-2 px-2.5 whitespace-nowrap text-slate-200">
+                          <td
+                            className="py-2 px-2.5 text-slate-200 truncate max-w-[180px]"
+                            title={r.player_name || ''}
+                          >
                             {r.player_name || '—'}
                           </td>
                           <td className="py-2 px-2.5 whitespace-nowrap text-slate-200">
@@ -738,6 +798,35 @@ export default function GuestsPage() {
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot className="sticky bottom-0">
+                      <tr className="border-t border-slate-700 bg-slate-950 font-bold">
+                        <td className="py-2 px-2.5 whitespace-nowrap text-slate-400" colSpan={7}>
+                          GRAND TOTAL
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
+                          {formatAmount(recordsTotals.buy_in)}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
+                          {formatAmount(recordsTotals.cashout)}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
+                          {formatAmount(recordsTotals.rolling)}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-amber-400">
+                          {formatAmount(recordsTotals.commission)}
+                        </td>
+                        <td
+                          className={`py-2 px-2.5 text-right whitespace-nowrap ${
+                            recordsTotals.win_loss >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
+                        >
+                          {formatAmount(recordsTotals.win_loss)}
+                        </td>
+                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100 font-mono-num">
+                          {formatAmount(recordsTotals.balance)}
+                        </td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               )}

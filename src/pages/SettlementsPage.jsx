@@ -1,6 +1,7 @@
 import { Gamepad2, Search, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import { useAuth } from '../AuthContext';
 import ConfirmDialog from '../ConfirmDialog';
 import { useRealtime } from '../useRealtime';
 
@@ -44,6 +45,9 @@ const JUNKET_BADGE = {
 const PAGE_SIZE = 20;
 
 export default function SettlementsPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.agentId == null;
+
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -137,11 +141,6 @@ export default function SettlementsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">Settlements</h1>
-          <p className="text-sm text-slate-400 mt-0.5">
-            <span className={live ? 'text-emerald-400' : 'text-slate-500'}>
-              {live ? 'live' : 'reconnecting…'}
-            </span>
-          </p>
         </div>
       </div>
 
@@ -230,16 +229,18 @@ export default function SettlementsPage() {
             <option value="infinity">Infinity</option>
           </select>
 
-          <button
-            type="button"
-            onClick={() => setConfirmOpen(true)}
-            disabled={clearing}
-            title="Delete all settlements and messages"
-            className="px-2.5 py-1.5 text-sm font-semibold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-md transition border border-rose-500/20 flex items-center gap-1 cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            {clearing ? 'Clearing…' : 'Clear data'}
-          </button>
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => setConfirmOpen(true)}
+              disabled={clearing}
+              title="Delete all settlements and messages"
+              className="px-2.5 py-1.5 text-sm font-semibold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-md transition border border-rose-500/20 flex items-center gap-1 cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {clearing ? 'Clearing…' : 'Clear data'}
+            </button>
+          ) : null}
         </div>
       </div>
 

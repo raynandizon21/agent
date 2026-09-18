@@ -67,7 +67,14 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<Shell />}>
           <Route path="/" element={<SettlementsPage />} />
-          <Route path="/messages" element={<InboxPage />} />
+          <Route
+            path="/messages"
+            element={
+              <AdminOnly>
+                <InboxPage />
+              </AdminOnly>
+            }
+          />
           <Route path="/settlements" element={<Navigate to="/" replace />} />
           <Route
             path="/agents"
