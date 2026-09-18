@@ -75,10 +75,11 @@ message the bot directly (path 1), or a manual forward.
    makes re-delivery of the same Telegram update a no-op (see Gotchas below)
    instead of a duplicate row.
 3. Runs [settlementParse.js](../../../server/services/settlementParse.js)
-   (pure regex/keyword matching, **not AI**) — tries Demo Cage (step-by-step:
-   start → buy-in → cashout → end, merged via `settlementModel.upsertStep()`
-   keyed on `(junket, account_no, game_no)`), then Galaxy, then Win9, in
-   that order, first match wins.
+   (pure regex/keyword matching, **not AI**) — tries, in order: Infinity Cage
+   (step-based, keyed on `(junket, account_no, game_no)`), Demo Cage's
+   step sequence (start → buy-in → cashout → end, same keying), Demo Cage's
+   standalone account-transaction messages (deposit/withdrawal, see below),
+   Galaxy, then Win9. First match wins.
 4. Emits `Events.MESSAGE` / `Events.SETTLEMENT` on the in-process bus
    ([server/services/events.js](../../../server/services/events.js)),
    which `server/realtime.js` broadcasts over WebSocket to every connected
@@ -87,13 +88,71 @@ message the bot directly (path 1), or a manual forward.
 A genuinely new report wording needs a new pattern added to
 `settlementParse.js`; run `node scripts/test-parse.mjs` after touching it.
 
+### Demo Cage has two unrelated message shapes
+
+Don't assume every Demo Cage message is a step in a game — it sends two
+structurally different kinds, both handled in `settlementParse.js`:
+
+1. **Game steps** (`parseDemoCage`/`demoCageStep`) — `Game Start *` →
+   `Additional Buy-in *` → `Cashout *` → `Game End / Settlement *`, English
+   labels, always carries a `Game #:`. Merged into one row per game via
+   `settlementModel.upsertStep()`, same as Infinity Cage's steps.
+2. **Account transactions** (`parseDemoCageTransaction`) — `* 어카운트 입금 *`
+   (deposit) / `* 어카운트 출금 *` (withdrawal), Korean labels (계정/금액/잔고/
+   날짜/시간), **no** `Game #:` at all. Each message is a complete, standalone
+   event — 입금 → `buy_in`, 출금 → `cashout`, 잔고 → `balance` — so it has no
+   `step` key and `ingest.js` inserts a fresh row per message via
+   `settlementModel.create()` instead of merging. Added 2026-09-18 after a
+   report that these messages landed in `message_logs` but never produced a
+   settlements row — the older step parser doesn't recognize this shape
+   (no step header, no game #), and Win9's parser almost swallows it (its
+   "looks like Win9" check matches on the bare word "어카운트") but bails
+   since there are no buy-in/cashout/rolling amounts to find.
+
 ## Database (MySQL, self-migrating)
-Four tables — `users`, `agents`, `message_logs`, `settlements`. Reference DDL
-in [sql/schema.sql](../../../sql/schema.sql); each model's `ensureTable()`
+Seven tables — `users`, `agents`, `guests`, `guest_junkets`, `bot_config`,
+`message_logs`, `settlements`. Reference DDL in
+[sql/schema.sql](../../../sql/schema.sql); each model's `ensureTable()`
 (called from `server/index.js` `main()`) creates/migrates on every boot via
 `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN` / `ADD UNIQUE KEY`, each guarded
 against its "already applied" MySQL error code. Follow this same pattern for
-future schema changes rather than hand-editing production tables.
+future schema changes rather than hand-editing production tables. Every
+table uses `IDNo` as an `AUTO_INCREMENT PRIMARY KEY` — this org's DB
+convention, followed even for pure join tables like `guest_junkets` (which
+enforces its one-row-per-pair rule with a `UNIQUE KEY` instead of making
+that pair the primary key). Note for any future composite-key migration on
+a table with a live FK: `DROP PRIMARY KEY` and `ADD COLUMN ... PRIMARY KEY`
+must be one single `ALTER TABLE` with multiple clauses — doing them as
+separate statements briefly leaves the FK'd column with no index at all,
+which InnoDB rejects with errno 150.
+
+`bot_config` — singleton row (`IDNo=1`) holding the live `BOT_TOKEN`. Edited
+from the **Telegram** page; saves apply immediately, no server restart
+needed (`server/services/telegram.js` re-reads it rather than caching the
+`.env` value past boot).
+
+`guests` — a player/guest directory independent of `agents` (an agent is a
+staff member who *sends* reports; a guest is a player who *appears in* them).
+Plain fields: `guest_code`, `guest_name`, optional `telegram_id`, `active`,
+plus `encoded_by`/`encoded_dt`/`edited_by`/`edited_dt` audit columns set
+server-side from `req.user.username` in
+[guestController.js](../../../server/controllers/guestController.js).
+Managed from the **Guests** page, admin-only (`guestRoutes.js` gates the
+whole router with `requireAdmin`).
+
+`guest_junkets` — many-to-many: one guest can play across several junkets
+(confirmed 2026-09-18 — a guest is *not* scoped to one junket), so this is a
+join table (`GUEST_ID`, `JUNKET`, unique on the pair) rather than a column on
+`guests`. Its `ACCOUNT_NO` optionally links a (guest, junket) pair to that
+junket's *real* account number/name — sourced from already-parsed
+`settlements` rows via `GET /api/settlements/accounts?junket=X`
+(`settlementModel.listAccounts()`, admin-only, returns one row per
+`ACCOUNT_NO` using its most recent `PLAYER_NAME`), not typed freehand. The
+**Guests** page's junket checkboxes reveal a `<select>` populated from that
+endpoint when checked. `guestModel.listAll()` fetches `guests` and
+`guest_junkets` as two separate queries and merges them in JS (rather than
+one `GROUP_CONCAT`'d query) specifically so `ACCOUNT_NO` — which can contain
+arbitrary characters — never has to be split back out of a delimited string.
 
 `agents` — maps a Telegram id to a name; `is_active` supports deactivating
 without losing history (FKs from `message_logs`/`settlements` are
@@ -132,18 +191,35 @@ thing preventing a total lockout. Managed from the **Users** page.
   `getUpdates` allows exactly one long-poll consumer per bot token. This
   error means **two server instances are running simultaneously** — easy to
   do accidentally: a `node --watch server/index.js` from an earlier terminal
-  session left running, plus a freshly started `npm run dev`. Find every
-  instance with:
+  session left running, plus a freshly started `npm run dev`. A newer,
+  friendlier symptom of the same root cause: the second instance now fails
+  fast with `Failed to start server: port 6000 is already in use... Refusing
+  to start a second Telegram poller alongside it` instead of silently
+  double-polling.
+
+  **Don't misread a `--watch` parent/child pair as two instances.**
+  `node --watch server/index.js` does not restart in place — it stays alive
+  as a supervisor and *spawns a child* `node server/index.js` to actually
+  run the app, killing/respawning only that child on file changes. So one
+  healthy dev server legitimately shows up as **two** processes. Check
+  `ParentProcessId` before killing anything:
   ```powershell
   Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
     Where-Object { $_.CommandLine -like '*server/index.js*' } |
-    Select-Object ProcessId, CreationDate, CommandLine
+    Select-Object ProcessId, ParentProcessId, CommandLine
   ```
-  and stop all but one. `node --watch`'s restart-on-file-change does **not**
-  guarantee the previous process is gone before the new one starts polling,
-  and a background task started via a tool is a separate OS process tree
-  from a pre-existing terminal's `npm run dev` — killing one doesn't affect
-  the other.
+  A legitimate pair: one `node --watch server/index.js` whose `ProcessId`
+  equals the *other* row's `ParentProcessId`. An actual duplicate: a
+  **second** `node --watch server/index.js` (or a plain `node
+  server/index.js` / `npm start`) whose parent is a *different* shell —
+  trace it with
+  `Get-CimInstance Win32_Process -Filter "ProcessId=<ParentProcessId>"`
+  to confirm before stopping it. Only stop the extra tree, never the one
+  child whose watcher parent you want to keep running. Also worth
+  remembering: `node --watch`'s restart-on-file-change does not guarantee
+  the previous child is gone before a new one starts, and a background task
+  started via a tool is a separate OS process tree from a pre-existing
+  terminal's `npm run dev` — killing one doesn't affect the other.
 
 - **XAMPP MySQL isn't a Windows service here** — no `mysqld`/`MySQL80`
   service is registered. Start it with
@@ -176,7 +252,7 @@ worked — don't rebuild it without the owner explicitly asking again.
 ## Key files map
 ```
 server/
-  index.js                    boot: DB check, ensureTable() x4, admin seed, startTelegram(), listen
+  index.js                    boot: DB check, ensureTable() x6 (agents, guests, bot_config, users, message_logs, settlements), admin seed, startTelegram(), listen
   db.js                       mysql2 pool, env config
   realtime.js                 WebSocket: JWT auth, broadcasts bus events
   middleware/auth.js           authMiddleware (JWT) + requireAdmin (agentId must be null)
@@ -189,13 +265,16 @@ server/
     events.js                   EventEmitter bus (message/settlement)
   models/
     messageModel.js             message_logs CRUD + the dedup unique-key migration + agentId filter
-    settlementModel.js          settlements CRUD, step-merge upsert, ensureTable()/ensureColumn(), agentId filter
+    settlementModel.js          settlements CRUD, step-merge upsert, listAccounts() (per-junket distinct accounts, powers Guests linking), ensureTable()/ensureColumn(), agentId filter
     agentModel.js                agents CRUD (name/telegram_id/is_active)
     userModel.js                 dashboard logins CRUD, agent_id link, countAdmins() safety check
+    guestModel.js                 guests CRUD + guest_junkets many-to-many (setJunkets), ensureTable() incl. the composite->IDNo PK migration
+    botConfigModel.js             singleton bot_config row (BOT_TOKEN), read live by telegram.js on every poll
 
 src/pages/
   AgentsPage.jsx                 chat-id maintenance: add/edit/deactivate/delete, sender vs receiver
   UsersPage.jsx                   logins: create, scope to an agent, reset password, delete — admin-only
+  GuestsPage.jsx                  guest directory + JunketPicker (checkbox reveals a <select> of real accounts per junket, from GET /settlements/accounts)
 
 sql/schema.sql                 reference DDL (server also self-migrates on boot)
 scripts/test-parse.mjs         parser fixtures — run after touching settlementParse.js

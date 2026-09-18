@@ -235,10 +235,89 @@ export async function deleteGame({ junket, account_no, game_no }) {
   return result.affectedRows || 0;
 }
 
+// Recomputes COMMISSION = ROUND(BUY_IN * rate / 100) on every existing
+// settlement row for one (junket, account_no) — used when a guest's linked
+// account gets a commission rate saved on the Guests page, so past and
+// current games for that account reflect the new rate immediately. Rows
+// with no BUY_IN are left untouched (nothing to compute from).
+export async function recomputeCommission({ junket, account_no, rate }) {
+  const result = await query(
+    `UPDATE settlements
+        SET COMMISSION = ROUND(BUY_IN * :rate / 100)
+      WHERE JUNKET = :junket AND ACCOUNT_NO = :account_no AND BUY_IN IS NOT NULL`,
+    { junket, account_no, rate }
+  );
+  return result.affectedRows || 0;
+}
+
 export async function deleteAll() {
   // "Clear data" wipes everything: settlements AND the message log they came
   // from. FK checks off so order doesn't matter; AUTO_INCREMENT resets.
   await truncateTables(['settlements', 'message_logs']);
+}
+
+// Distinct accounts seen for a junket, one row per ACCOUNT_NO using its most
+// recent PLAYER_NAME — used to populate the guest-linking dropdown on the
+// Guests page (so an admin picks a real, already-parsed account instead of
+// retyping it).
+// `agentId` scopes the results to one agent's own settlements — pass the
+// logged-in user's agentId (null for an admin login, which sees everything).
+export async function listAccounts({ junket, agentId = null }) {
+  const params = { junket };
+  let agentFilter = '';
+  if (agentId != null) {
+    agentFilter = 'AND AGENT_ID = :agentId';
+    params.agentId = agentId;
+  }
+  return query(
+    `SELECT t.ACCOUNT_NO AS account_no, t.PLAYER_NAME AS player_name
+     FROM settlements t
+     INNER JOIN (
+       SELECT ACCOUNT_NO, MAX(IDNo) AS max_id
+       FROM settlements
+       WHERE JUNKET = :junket AND ACCOUNT_NO IS NOT NULL AND ACCOUNT_NO <> '' ${agentFilter}
+       GROUP BY ACCOUNT_NO
+     ) latest ON latest.ACCOUNT_NO = t.ACCOUNT_NO AND latest.max_id = t.IDNo
+     ORDER BY t.ACCOUNT_NO ASC`,
+    params
+  );
+}
+
+// Settlement/game history for a specific set of (junket, account_no) pairs —
+// powers the Guests page's row-click detail view. `agentId` scopes to one
+// agent's own settlements (null = admin, sees all matching rows regardless
+// of which agent processed them).
+export async function listByAccounts(pairs, { agentId = null } = {}) {
+  const clean = (pairs || []).filter((p) => p.account_no);
+  if (clean.length === 0) return [];
+
+  const params = {};
+  const orClauses = clean.map((p, i) => {
+    params[`junket${i}`] = p.junket;
+    params[`account${i}`] = p.account_no;
+    return `(s.JUNKET = :junket${i} AND s.ACCOUNT_NO = :account${i})`;
+  });
+
+  let sql = `
+    SELECT
+      s.IDNo AS id, s.AGENT_ID AS agent_id, a.NAME AS agent_name,
+      s.JUNKET AS junket, s.ACCOUNT_NO AS account_no, s.ACCOUNT_NAME AS account_name,
+      s.PLAYER_NAME AS player_name, s.GAME_NO AS game_no,
+      s.BUY_IN AS buy_in, s.CASHOUT AS cashout, s.WIN_LOSS AS win_loss,
+      s.ROLLING AS rolling, s.COMMISSION AS commission, s.BALANCE AS balance,
+      s.SETTLED_AT AS settled_at, s.STATUS AS status, s.STEP AS step,
+      s.CREATED_AT AS created_at
+    FROM settlements s
+    LEFT JOIN agents a ON a.IDNo = s.AGENT_ID
+    WHERE (${orClauses.join(' OR ')})
+  `;
+  if (agentId != null) {
+    sql += ` AND s.AGENT_ID = :agentId`;
+    params.agentId = agentId;
+  }
+  sql += ` ORDER BY s.CREATED_AT DESC`;
+
+  return query(sql, params);
 }
 
 // `agentId` scopes the results to one agent's own settlements — pass the

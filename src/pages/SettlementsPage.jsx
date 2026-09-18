@@ -1,18 +1,23 @@
+import { Gamepad2, Search, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import ConfirmDialog from '../ConfirmDialog';
 import { useRealtime } from '../useRealtime';
 
-function formatWhen(value) {
-  if (!value) return '—';
-  return new Date(value).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'numeric',
+function formatWhenParts(value) {
+  if (!value) return { dateStr: '—', timeStr: '' };
+  const d = new Date(value);
+  const dateStr = d.toLocaleDateString(undefined, {
+    month: 'short',
     day: 'numeric',
+    year: 'numeric',
+  });
+  const timeStr = d.toLocaleTimeString(undefined, {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   });
+  return { dateStr, timeStr };
 }
 
 function formatAmount(value) {
@@ -29,7 +34,14 @@ function sumField(rows, key) {
   }, 0);
 }
 
-const PAGE_SIZE = 12;
+const JUNKET_BADGE = {
+  win9: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  galaxy: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+  democage: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  infinity: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+};
+
+const PAGE_SIZE = 20;
 
 export default function SettlementsPage() {
   const [rows, setRows] = useState([]);
@@ -121,21 +133,95 @@ export default function SettlementsPage() {
   const pagedRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
-    <section className="page">
-      <header className="page-head">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1>Settlements</h1>
-          <p className="muted">
-            <span className={live ? 'ok' : 'muted'}>
+          <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">Settlements</h1>
+          <p className="text-sm text-slate-400 mt-0.5">
+            <span className={live ? 'text-emerald-400' : 'text-slate-500'}>
               {live ? 'live' : 'reconnecting…'}
             </span>
           </p>
         </div>
-        <div className="search-row">
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
+        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800">
+          <span className="text-[13px] font-semibold text-slate-400 uppercase tracking-wider block truncate">
+            Buy-in
+          </span>
+          <span className="text-sm sm:text-base font-bold text-slate-100 font-mono-num tracking-tight block mt-0.5 truncate">
+            {formatAmount(totals.buy_in)}
+          </span>
+        </div>
+        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800">
+          <span className="text-[13px] font-semibold text-slate-400 uppercase tracking-wider block truncate">
+            Cashout
+          </span>
+          <span className="text-sm sm:text-base font-bold text-slate-100 font-mono-num tracking-tight block mt-0.5 truncate">
+            {formatAmount(totals.cashout)}
+          </span>
+        </div>
+        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800">
+          <span className="text-[13px] font-semibold text-slate-400 uppercase tracking-wider block truncate">
+            Rolling
+          </span>
+          <span className="text-sm sm:text-base font-bold text-slate-100 font-mono-num tracking-tight block mt-0.5 truncate">
+            {formatAmount(totals.rolling)}
+          </span>
+        </div>
+        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800">
+          <span className="text-[13px] font-semibold text-amber-400/90 uppercase tracking-wider block truncate">
+            Commission
+          </span>
+          <span className="text-sm sm:text-base font-bold text-amber-400 font-mono-num tracking-tight block mt-0.5 truncate">
+            {formatAmount(totals.commission)}
+          </span>
+        </div>
+        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800 col-span-2 sm:col-span-1">
+          <span className="text-[13px] font-semibold text-slate-400 uppercase tracking-wider block truncate">
+            Win / Loss
+          </span>
+          <span
+            className={`text-sm sm:text-base font-bold font-mono-num tracking-tight block mt-0.5 truncate ${
+              totals.win_loss >= 0 ? 'text-emerald-400' : 'text-rose-400'
+            }`}
+          >
+            {totals.win_loss >= 0 ? '+' : ''}
+            {formatAmount(totals.win_loss)}
+          </span>
+        </div>
+      </div>
+
+      {/* Search & filter bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-slate-900 border border-slate-800 text-sm">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search account, player, game no…"
+            className="w-full bg-slate-950 border border-slate-800 rounded-md pl-8 pr-7 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
+          />
+          {q && (
+            <button
+              type="button"
+              onClick={() => setQ('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap shrink-0">
           <select
             value={junket}
             onChange={(e) => setJunket(e.target.value)}
             aria-label="Junket filter"
+            className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1.5 text-sm text-slate-300 focus:outline-hidden cursor-pointer"
           >
             <option value="">All junkets</option>
             <option value="win9">Win9</option>
@@ -143,22 +229,19 @@ export default function SettlementsPage() {
             <option value="democage">Demo Cage</option>
             <option value="infinity">Infinity</option>
           </select>
-          <input
-            placeholder="Search account, player, game no…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+
           <button
             type="button"
-            className="danger"
             onClick={() => setConfirmOpen(true)}
             disabled={clearing}
             title="Delete all settlements and messages"
+            className="px-2.5 py-1.5 text-sm font-semibold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-md transition border border-rose-500/20 flex items-center gap-1 cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
           >
+            <Trash2 className="w-3.5 h-3.5" />
             {clearing ? 'Clearing…' : 'Clear data'}
           </button>
         </div>
-      </header>
+      </div>
 
       <ConfirmDialog
         open={confirmOpen}
@@ -170,111 +253,156 @@ export default function SettlementsPage() {
         onCancel={() => setConfirmOpen(false)}
       />
 
-      {error ? <p className="error">{error}</p> : null}
-      {loading && rows.length === 0 ? <p className="muted">Loading…</p> : null}
+      {error ? <p className="text-rose-400 text-sm">{error}</p> : null}
+      {loading && rows.length === 0 ? <p className="text-slate-400 text-sm">Loading…</p> : null}
 
-      <div className="table-wrap">
-        <table className="settlements-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Status</th>
-              <th>Junket</th>
-              <th>Game No.</th>
-              <th>Account No.</th>
-              <th>Player Name</th>
-              <th>Agent</th>
-              <th>Buy-in</th>
-              <th>Cashout</th>
-              <th>Rolling</th>
-              <th>Commission</th>
-              <th>Win/Loss</th>
-              <th>Balance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && !loading ? (
+      {rows.length === 0 && !loading ? (
+        <div className="p-8 text-center rounded-lg bg-slate-900 border border-slate-800 space-y-1.5">
+          <Gamepad2 className="w-6 h-6 text-slate-600 mx-auto" />
+          <h3 className="text-base font-semibold text-slate-300">No settlements yet.</h3>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg bg-slate-900 border border-slate-800 shadow-xs">
+          <table className="w-full text-left text-sm border-collapse min-w-[1100px]">
+            <thead className="bg-slate-950 text-slate-400 uppercase text-[13px] font-bold tracking-wider border-b border-slate-800 select-none sticky top-0 z-10">
               <tr>
-                <td colSpan={13} className="empty">
-                  No settlements yet.
-                </td>
+                <th className="py-2.5 px-3 whitespace-nowrap">Date</th>
+                <th className="py-2.5 px-2.5 whitespace-nowrap">Status</th>
+                <th className="py-2.5 px-2.5 whitespace-nowrap">Junket</th>
+                <th className="py-2.5 px-2.5 whitespace-nowrap">Game No.</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Account No.</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Player Name</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">Agent</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap">Buy-in</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap">Cashout</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap">Rolling</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap">Commission</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap">Win/Loss</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap">Balance</th>
               </tr>
-            ) : (
-              pagedRows.map((s) => (
-                <tr key={s.id}>
-                  <td className="mono" data-label="Date">{formatWhen(s.settled_at || s.created_at)}</td>
-                  <td data-label="Status">
-                    <span className={`badge status-${s.status}`}>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 font-mono">
+              {pagedRows.map((s) => {
+                const { dateStr, timeStr } = formatWhenParts(s.settled_at || s.created_at);
+                return (
+                <tr key={s.id} className="hover:bg-slate-800/40 transition">
+                  <td className="py-2.5 px-3 whitespace-nowrap font-mono-num text-sm leading-tight">
+                    <div className="text-slate-200">{dateStr}</div>
+                    {timeStr ? <div className="text-slate-400 text-[14px] mt-0.5">{timeStr}</div> : null}
+                  </td>
+                  <td className="py-2.5 px-2.5 whitespace-nowrap font-sans">
+                    <span
+                      className={`text-[12px] uppercase font-semibold px-2 py-0.5 rounded border ${
+                        s.status === 'open'
+                          ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+                          : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                      }`}
+                    >
                       {s.status === 'open' ? s.step || 'open' : 'settled'}
                     </span>
                   </td>
-                  <td data-label="Junket">
-                    <span className={`badge junket-${s.junket}`}>{s.junket}</span>
+                  <td className="py-2.5 px-2.5 whitespace-nowrap font-sans">
+                    <span
+                      className={`text-[12px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-sm border ${
+                        JUNKET_BADGE[s.junket] || 'bg-slate-700 text-slate-300 border-slate-600'
+                      }`}
+                    >
+                      {s.junket}
+                    </span>
                   </td>
-                  <td className="mono" data-label="Game No.">{s.game_no || '—'}</td>
-                  <td className="mono" data-label="Account No.">
-                    <div style={{ whiteSpace: 'nowrap' }}>{s.account_no || '—'}</div>
+                  <td className="py-2.5 px-2.5 whitespace-nowrap font-mono-num text-slate-300">{s.game_no || '—'}</td>
+                  <td className="py-2.5 px-3 whitespace-nowrap font-sans">
+                    <div className="font-bold text-white font-mono-num text-sm">{s.account_no || '—'}</div>
                     {s.account_name ? (
-                      <div className="muted" style={{ whiteSpace: 'nowrap' }}>
-                        {s.account_name}
-                      </div>
+                      <div className="text-[14px] text-slate-400 mt-0.5">{s.account_name}</div>
                     ) : null}
                   </td>
-                  <td data-label="Player Name">{s.player_name || '—'}</td>
-                  <td data-label="Agent">
-                    {s.agent_name || (
-                      <span className="badge warn">Unmatched</span>
+                  <td className="py-2.5 px-3 whitespace-nowrap font-sans text-slate-200">
+                    {s.player_name || '—'}
+                  </td>
+                  <td className="py-2.5 px-3 whitespace-nowrap font-sans">
+                    {s.agent_name ? (
+                      <span className="font-medium text-slate-200">{s.agent_name}</span>
+                    ) : (
+                      <span className="text-[12px] uppercase font-semibold px-2 py-0.5 rounded border bg-amber-500/10 text-amber-300 border-amber-500/20">
+                        Unmatched
+                      </span>
                     )}
                   </td>
-                  <td className="mono num" data-label="Buy-in">{formatAmount(s.buy_in)}</td>
-                  <td className="mono num" data-label="Cashout">{formatAmount(s.cashout)}</td>
-                  <td className="mono num" data-label="Rolling">{formatAmount(s.rolling)}</td>
-                  <td className="mono num" data-label="Commission">{formatAmount(s.commission)}</td>
-                  <td className="mono num" data-label="Win/Loss">{formatAmount(s.win_loss)}</td>
-                  <td className="mono num" data-label="Balance">{formatAmount(s.balance)}</td>
+                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-200">
+                    {formatAmount(s.buy_in)}
+                  </td>
+                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-200">
+                    {formatAmount(s.cashout)}
+                  </td>
+                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-100">
+                    {formatAmount(s.rolling)}
+                  </td>
+                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-amber-400">
+                    {formatAmount(s.commission)}
+                  </td>
+                  <td
+                    className={`py-2.5 px-3 text-right whitespace-nowrap font-bold ${
+                      Number(s.win_loss) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {formatAmount(s.win_loss)}
+                  </td>
+                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-200 font-mono-num">
+                    {formatAmount(s.balance)}
+                  </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-          {rows.length > 0 ? (
-            <tfoot>
-              <tr className="totals-row">
-                <td colSpan={7} data-label="Total">Total</td>
-                <td className="mono num" data-label="Buy-in">{formatAmount(totals.buy_in)}</td>
-                <td className="mono num" data-label="Cashout">{formatAmount(totals.cashout)}</td>
-                <td className="mono num" data-label="Rolling">{formatAmount(totals.rolling)}</td>
-                <td className="mono num" data-label="Commission">{formatAmount(totals.commission)}</td>
-                <td className="mono num" data-label="Win/Loss">{formatAmount(totals.win_loss)}</td>
-                <td data-label="Balance"></td>
-              </tr>
-            </tfoot>
-          ) : null}
-        </table>
-      </div>
+                );
+              })}
+            </tbody>
+            {rows.length > 0 ? (
+              <tfoot>
+                <tr className="border-t border-slate-800 bg-slate-950/70 font-bold">
+                  <td colSpan={7} className="py-3 px-3 text-slate-300">
+                    Total
+                  </td>
+                  <td className="py-3 px-3 text-right text-slate-100">{formatAmount(totals.buy_in)}</td>
+                  <td className="py-3 px-3 text-right text-slate-100">{formatAmount(totals.cashout)}</td>
+                  <td className="py-3 px-3 text-right text-slate-100">{formatAmount(totals.rolling)}</td>
+                  <td className="py-3 px-3 text-right text-amber-400">{formatAmount(totals.commission)}</td>
+                  <td
+                    className={`py-3 px-3 text-right ${
+                      totals.win_loss >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {formatAmount(totals.win_loss)}
+                  </td>
+                  <td className="py-3 px-3"></td>
+                </tr>
+              </tfoot>
+            ) : null}
+          </table>
+        </div>
+      )}
 
       {rows.length > 0 ? (
-        <div className="pager">
+        <div className="flex items-center justify-end gap-3">
           <button
             type="button"
-            className="ghost"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
+            className="px-3 py-1.5 text-sm font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-lg transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
           >
             Prev
           </button>
-          <span className="muted">
+          <span className="text-sm text-slate-400">
             Page {page} of {totalPages}
           </span>
           <button
             type="button"
-            className="ghost"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
+            className="px-3 py-1.5 text-sm font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-lg transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
           >
             Next
           </button>
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }

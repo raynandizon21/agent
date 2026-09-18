@@ -6,6 +6,7 @@ const router = Router();
 
 router.use(authMiddleware);
 router.get('/', settlementController.list);
+router.get('/accounts', settlementController.accounts);
 router.delete('/', requireAdmin, settlementController.clear);
 
 export default router;

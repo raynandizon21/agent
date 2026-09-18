@@ -1,3 +1,4 @@
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { createLogger, defineConfig } from 'vite'
 
@@ -15,7 +16,7 @@ logger.error = (msg, opts) => {
 }
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   customLogger: logger,
   server: {
     host: true,

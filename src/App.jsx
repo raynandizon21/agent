@@ -1,5 +1,8 @@
-import { NavLink, Navigate, Outlet, Route, Routes } from 'react-router-dom';
+import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
+import BottomNav from './components/layout/BottomNav';
+import Navbar from './components/layout/Navbar';
+import Sidebar from './components/layout/Sidebar';
 import AgentsPage from './pages/AgentsPage';
 import GuestsPage from './pages/GuestsPage';
 import InboxPage from './pages/InboxPage';
@@ -12,7 +15,11 @@ function Shell() {
   const { user, loading, logout } = useAuth();
 
   if (loading) {
-    return <div className="boot">Loading…</div>;
+    return (
+      <div className="min-h-screen grid place-items-center bg-slate-950 text-slate-400 text-sm">
+        Loading…
+      </div>
+    );
   }
 
   if (!user) {
@@ -24,37 +31,25 @@ function Shell() {
   const isAdmin = user.agentId == null;
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <p className="brand">Agent Inbox</p>
-        <nav>
-          <NavLink to="/" end>
-            Settlements
-          </NavLink>
-          <NavLink to="/messages">Messages</NavLink>
-          {isAdmin ? <NavLink to="/agents">Agents</NavLink> : null}
-          {isAdmin ? <NavLink to="/guests">Guests</NavLink> : null}
-          {isAdmin ? <NavLink to="/users">Users</NavLink> : null}
-          {isAdmin ? <NavLink to="/telegram">Telegram</NavLink> : null}
-        </nav>
-        <div className="sidebar-foot">
-          <span className="muted">
-            {user.username}
-            {!isAdmin ? (
-              <>
-                {' '}
-                <span className="badge">{user.agentName || 'agent'}</span>
-              </>
-            ) : null}
-          </span>
-          <button type="button" className="ghost" onClick={logout}>
-            Log out
-          </button>
-        </div>
-      </aside>
-      <main>
-        <Outlet />
-      </main>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-blue-600/30 selection:text-blue-200">
+      <Navbar
+        username={user.username}
+        agentName={user.agentName}
+        isAdmin={isAdmin}
+        onLogout={logout}
+      />
+
+      <div className="flex-1 flex w-full">
+        <Sidebar isAdmin={isAdmin} />
+
+        <main className="flex-1 p-2.5 sm:p-5 overflow-y-auto min-w-0 pb-24 lg:pb-6">
+          <Outlet />
+        </main>
+      </div>
+
+      <div className="block lg:hidden">
+        <BottomNav isAdmin={isAdmin} />
+      </div>
     </div>
   );
 }
@@ -82,14 +77,7 @@ export default function App() {
               </AdminOnly>
             }
           />
-          <Route
-            path="/guests"
-            element={
-              <AdminOnly>
-                <GuestsPage />
-              </AdminOnly>
-            }
-          />
+          <Route path="/guests" element={<GuestsPage />} />
           <Route
             path="/users"
             element={

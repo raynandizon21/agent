@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE TABLE IF NOT EXISTS guests (
   IDNo INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  -- The agent who onboarded/owns this guest. A scoped agent login only ever
+  -- sees and edits their own guests (see guestModel/guestController); an
+  -- admin login sees and can assign/reassign all. NULL = unowned (an admin
+  -- created it without picking an agent).
+  AGENT_ID INT UNSIGNED NULL,
   TELEGRAM_ID BIGINT NULL,
   GUEST_CODE VARCHAR(64) NULL,
   GUEST_NAME VARCHAR(120) NOT NULL,
@@ -40,7 +45,29 @@ CREATE TABLE IF NOT EXISTS guests (
   EDITED_DT TIMESTAMP NULL,
   ACTIVE TINYINT(1) NOT NULL DEFAULT 1,
   UNIQUE KEY uq_guests_code (GUEST_CODE),
-  UNIQUE KEY uq_guests_telegram_id (TELEGRAM_ID)
+  UNIQUE KEY uq_guests_telegram_id (TELEGRAM_ID),
+  CONSTRAINT fk_guest_agent
+    FOREIGN KEY (AGENT_ID) REFERENCES agents(IDNo)
+    ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- A guest can play across several junkets, so this is many-to-many rather
+-- than a column on guests. ACCOUNT_NO optionally links to that junket's
+-- real account number (as seen in settlements).
+CREATE TABLE IF NOT EXISTS guest_junkets (
+  IDNo INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  GUEST_ID INT UNSIGNED NOT NULL,
+  JUNKET VARCHAR(32) NOT NULL,
+  ACCOUNT_NO VARCHAR(120) NULL,
+  -- Commission rate as a percentage (e.g. 1.430 = 1.43%). Saving a guest
+  -- with this set recomputes COMMISSION = BUY_IN * rate/100 on every
+  -- existing settlement row for that (JUNKET, ACCOUNT_NO) — see
+  -- guestController.recomputeCommission.
+  COMMISSION_RATE DECIMAL(6,3) NULL,
+  UNIQUE KEY uq_guest_junkets_pair (GUEST_ID, JUNKET),
+  CONSTRAINT fk_guest_junkets_guest
+    FOREIGN KEY (GUEST_ID) REFERENCES guests(IDNo)
+    ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- Singleton row (IDNo=1) — there's only ever one bot.

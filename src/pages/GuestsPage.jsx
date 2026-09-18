@@ -1,21 +1,149 @@
-import { useEffect, useState } from 'react';
+import { Check, Edit2, Gamepad2, Loader2, Plus, Power, Search, Trash2, Users, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ConfirmDialog from '../ConfirmDialog';
+import Modal from '../components/common/Modal';
 
-const EMPTY_FORM = { telegram_id: '', guest_code: '', guest_name: '' };
+function formatAmount(value) {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  if (Number.isNaN(n)) return String(value);
+  return n.toLocaleString();
+}
+
+const PAGE_SIZE = 20;
+
+const JUNKETS = [
+  { value: 'win9', label: 'Win9', color: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
+  { value: 'galaxy', label: 'Galaxy', color: 'bg-purple-500/15 text-purple-400 border-purple-500/30' },
+  { value: 'democage', label: 'Demo Cage', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+  { value: 'infinity', label: 'Infinity', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
+];
+
+const EMPTY_FORM = { telegram_id: '', guest_code: '', guest_name: '', junkets: [] };
+
+// Junket checkboxes; checking one reveals a dropdown of that junket's real
+// account numbers (pulled from already-parsed Settlements) to link to this
+// guest. `value` is [{ junket, account_no }, ...]. `usedAccounts` is
+// { [junket]: Set(account_no) } already claimed by OTHER guests — a real
+// account belongs to one player, so those are hidden here to stop the same
+// account getting linked twice (this guest's own current pick stays visible).
+function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) {
+  return (
+    <div className="space-y-1.5">
+      {JUNKETS.map((j) => {
+        const entry = value.find((v) => v.junket === j.value);
+        const used = usedAccounts[j.value];
+        const options = (accountsByJunket[j.value] || []).filter(
+          (a) => a.account_no === entry?.account_no || !used?.has(a.account_no)
+        );
+        return (
+          <div key={j.value} className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-slate-200 w-24 shrink-0">
+              <input
+                type="checkbox"
+                checked={!!entry}
+                onChange={() =>
+                  onChange(
+                    entry
+                      ? value.filter((v) => v.junket !== j.value)
+                      : [...value, { junket: j.value, account_no: null, commission_rate: null }]
+                  )
+                }
+                className="rounded bg-slate-950 border-slate-700 text-blue-600 w-3.5 h-3.5 cursor-pointer"
+              />
+              <span className="font-semibold">{j.label}</span>
+            </label>
+            {entry ? (
+              <>
+                <select
+                  value={entry.account_no || ''}
+                  onChange={(e) =>
+                    onChange(
+                      value.map((v) =>
+                        v.junket === j.value ? { ...v, account_no: e.target.value || null } : v
+                      )
+                    )
+                  }
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 font-mono-num focus:outline-hidden"
+                >
+                  <option value="">Select account…</option>
+                  {options.map((a) => (
+                    <option key={a.account_no} value={a.account_no}>
+                      {a.account_no}
+                      {a.player_name ? ` — ${a.player_name}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <div className="relative w-24 shrink-0">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={entry.commission_rate ?? ''}
+                    onChange={(e) =>
+                      onChange(
+                        value.map((v) =>
+                          v.junket === j.value
+                            ? { ...v, commission_rate: e.target.value === '' ? null : e.target.value }
+                            : v
+                        )
+                      )
+                    }
+                    placeholder="Rate"
+                    title="Commission rate (%) — saving recomputes this account's commission on every game"
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 pr-5 text-sm text-slate-200 font-mono-num focus:outline-hidden"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 text-[13px] pointer-events-none">
+                    %
+                  </span>
+                </div>
+              </>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function GuestsPage() {
   const [guests, setGuests] = useState([]);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [accountsByJunket, setAccountsByJunket] = useState({});
+  const [junketFilter, setJunketFilter] = useState('');
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Inline edit state: which row is being edited, and its draft values.
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState(EMPTY_FORM);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingGuest, setEditingGuest] = useState(null); // null = create mode
+  const [form, setForm] = useState(EMPTY_FORM);
+
   const [rowBusy, setRowBusy] = useState(null); // guest id currently saving/deleting
   const [toDelete, setToDelete] = useState(null); // guest pending delete confirmation
+
+  const [viewingGuest, setViewingGuest] = useState(null); // guest whose records are shown
+  const [records, setRecords] = useState([]);
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  const [recordsError, setRecordsError] = useState('');
+
+  async function openView(g) {
+    setViewingGuest(g);
+    setRecords([]);
+    setRecordsError('');
+    setRecordsLoading(true);
+    try {
+      const data = await api(`/guests/${g.id}/settlements`);
+      setRecords(data.settlements || []);
+    } catch (err) {
+      setRecordsError(err.message || 'Failed to load game records');
+    } finally {
+      setRecordsLoading(false);
+    }
+  }
 
   async function load() {
     setError('');
@@ -27,72 +155,81 @@ export default function GuestsPage() {
     }
   }
 
+  async function loadAccounts() {
+    const entries = await Promise.all(
+      JUNKETS.map(async (j) => {
+        try {
+          const data = await api(`/settlements/accounts?junket=${j.value}`);
+          return [j.value, data.accounts || []];
+        } catch {
+          return [j.value, []];
+        }
+      })
+    );
+    setAccountsByJunket(Object.fromEntries(entries));
+  }
+
   useEffect(() => {
     load();
+    loadAccounts();
   }, []);
+
+  function openAdd() {
+    setEditingGuest(null);
+    setForm(EMPTY_FORM);
+    setError('');
+    setIsModalOpen(true);
+  }
+
+  function openEdit(g) {
+    setEditingGuest(g);
+    setForm({
+      telegram_id: g.telegram_id == null ? '' : String(g.telegram_id),
+      guest_code: g.guest_code,
+      guest_name: g.guest_name,
+      junkets: g.junkets || [],
+    });
+    setError('');
+    setIsModalOpen(true);
+  }
 
   async function onSubmit(e) {
     e.preventDefault();
     setBusy(true);
     setError('');
     setOk('');
+    const recomputed = form.junkets.some((j) => j.account_no && j.commission_rate != null);
     try {
-      await api('/guests', {
-        method: 'POST',
-        body: JSON.stringify({
-          telegram_id: form.telegram_id,
-          guest_code: form.guest_code,
-          guest_name: form.guest_name,
-        }),
-      });
-      setForm(EMPTY_FORM);
-      setOk('Guest added');
+      if (editingGuest) {
+        await api(`/guests/${editingGuest.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            telegram_id: form.telegram_id,
+            guest_code: form.guest_code,
+            guest_name: form.guest_name,
+            active: editingGuest.active,
+            junkets: form.junkets,
+          }),
+        });
+        setOk(recomputed ? 'Guest updated — commission recomputed for that account.' : 'Guest updated');
+      } else {
+        await api('/guests', {
+          method: 'POST',
+          body: JSON.stringify({
+            telegram_id: form.telegram_id,
+            guest_code: form.guest_code,
+            guest_name: form.guest_name,
+            junkets: form.junkets,
+          }),
+        });
+        setOk(recomputed ? 'Guest added — commission recomputed for that account.' : 'Guest added');
+      }
+      setIsModalOpen(false);
       await load();
     } catch (err) {
-      setError(err.message || 'Failed to add guest');
+      setError(err.message || 'Failed to save guest');
     } finally {
       setBusy(false);
-    }
-  }
-
-  function startEdit(g) {
-    setEditingId(g.id);
-    setEditForm({
-      telegram_id: g.telegram_id == null ? '' : String(g.telegram_id),
-      guest_code: g.guest_code,
-      guest_name: g.guest_name,
-      active: !!g.active,
-    });
-    setError('');
-    setOk('');
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setEditForm(EMPTY_FORM);
-  }
-
-  async function saveEdit(id) {
-    setRowBusy(id);
-    setError('');
-    setOk('');
-    try {
-      await api(`/guests/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          telegram_id: editForm.telegram_id,
-          guest_code: editForm.guest_code,
-          guest_name: editForm.guest_name,
-          active: editForm.active,
-        }),
-      });
-      setOk('Guest updated');
-      cancelEdit();
-      await load();
-    } catch (err) {
-      setError(err.message || 'Failed to update guest');
-    } finally {
-      setRowBusy(null);
     }
   }
 
@@ -108,6 +245,7 @@ export default function GuestsPage() {
           guest_code: g.guest_code,
           guest_name: g.guest_name,
           active: !g.active,
+          junkets: g.junkets,
         }),
       });
       await load();
@@ -135,163 +273,488 @@ export default function GuestsPage() {
     }
   }
 
+  const filteredGuests = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return guests.filter((g) => {
+      if (junketFilter && !(g.junkets || []).some((j) => j.junket === junketFilter)) return false;
+      if (!query) return true;
+      return (
+        (g.guest_code || '').toLowerCase().includes(query) ||
+        g.guest_name.toLowerCase().includes(query) ||
+        String(g.telegram_id ?? '').toLowerCase().includes(query) ||
+        (g.agent_name || '').toLowerCase().includes(query)
+      );
+    });
+  }, [guests, junketFilter, q]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredGuests.length / PAGE_SIZE));
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+  useEffect(() => {
+    setPage(1);
+  }, [q, junketFilter]);
+  const visibleGuests = filteredGuests.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Accounts already linked to OTHER guests, per junket — hidden from the
+  // picker so the same real account can't get linked to two guest records.
+  const usedAccounts = {};
+  for (const g of guests) {
+    if (editingGuest && g.id === editingGuest.id) continue;
+    for (const j of g.junkets || []) {
+      if (!j.account_no) continue;
+      if (!usedAccounts[j.junket]) usedAccounts[j.junket] = new Set();
+      usedAccounts[j.junket].add(j.account_no);
+    }
+  }
+
+  const inputClass =
+    'w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-hidden focus:border-blue-500 text-sm';
+
   return (
-    <section className="page">
-      <header className="page-head">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-slate-900 border border-slate-800">
         <div>
-          <h1>Guests</h1>
-          <p className="muted">Guest/player directory — code, name, and Telegram id.</p>
+          <h1 className="text-base font-bold text-slate-100 flex items-center gap-2">
+            <Users className="w-4 h-4 text-blue-400" />
+            Guests
+          </h1>
+          <p className="text-sm text-slate-400 mt-0.5">Guest/player directory — code, name, and Telegram id.</p>
         </div>
-      </header>
 
-      <form className="agent-form" onSubmit={onSubmit}>
-        <label>
-          Guest code
-          <input
-            value={form.guest_code}
-            onChange={(e) => setForm((f) => ({ ...f, guest_code: e.target.value }))}
-            placeholder="optional"
-          />
-        </label>
-        <label>
-          Guest name
-          <input
-            value={form.guest_name}
-            onChange={(e) => setForm((f) => ({ ...f, guest_name: e.target.value }))}
-            required
-          />
-        </label>
-        <label>
-          Telegram ID
-          <input
-            value={form.telegram_id}
-            onChange={(e) => setForm((f) => ({ ...f, telegram_id: e.target.value }))}
-            placeholder="optional"
-          />
-        </label>
-        <button type="submit" disabled={busy}>
-          {busy ? 'Saving…' : 'Add guest'}
+        <button
+          type="button"
+          onClick={openAdd}
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm font-semibold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shrink-0"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add guest
         </button>
-      </form>
-
-      {error ? <p className="error">{error}</p> : null}
-      {ok ? <p className="ok">{ok}</p> : null}
-
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Guest code</th>
-              <th>Guest name</th>
-              <th>Telegram ID</th>
-              <th>Active</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {guests.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="empty">
-                  No guests yet.
-                </td>
-              </tr>
-            ) : (
-              guests.map((g) => {
-                const editing = editingId === g.id;
-                const busyRow = rowBusy === g.id;
-                return (
-                  <tr key={g.id}>
-                    {editing ? (
-                      <>
-                        <td>
-                          <input
-                            value={editForm.guest_code}
-                            onChange={(e) =>
-                              setEditForm((f) => ({ ...f, guest_code: e.target.value }))
-                            }
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={editForm.guest_name}
-                            onChange={(e) =>
-                              setEditForm((f) => ({ ...f, guest_name: e.target.value }))
-                            }
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="mono"
-                            value={editForm.telegram_id}
-                            onChange={(e) =>
-                              setEditForm((f) => ({ ...f, telegram_id: e.target.value }))
-                            }
-                          />
-                        </td>
-                        <td>{editForm.active ? 'Yes' : 'No'}</td>
-                        <td>
-                          <div className="row-actions">
-                            <button
-                              type="button"
-                              onClick={() => saveEdit(g.id)}
-                              disabled={busyRow}
-                            >
-                              {busyRow ? 'Saving…' : 'Save'}
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost"
-                              onClick={cancelEdit}
-                              disabled={busyRow}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td>{g.guest_code || '—'}</td>
-                        <td>{g.guest_name}</td>
-                        <td className="mono">{g.telegram_id ?? '—'}</td>
-                        <td>{g.active ? 'Yes' : 'No'}</td>
-                        <td>
-                          <div className="row-actions">
-                            <button
-                              type="button"
-                              className="ghost"
-                              onClick={() => startEdit(g)}
-                              disabled={busyRow}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost"
-                              onClick={() => toggleActive(g)}
-                              disabled={busyRow}
-                            >
-                              {busyRow ? 'Working…' : g.active ? 'Deactivate' : 'Activate'}
-                            </button>
-                            <button
-                              type="button"
-                              className="danger"
-                              onClick={() => setToDelete(g)}
-                              disabled={busyRow}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
       </div>
+
+      {error ? <p className="text-rose-400 text-sm">{error}</p> : null}
+      {ok ? <p className="text-emerald-400 text-sm">{ok}</p> : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-slate-900 border border-slate-800 text-sm">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search code, name, telegram ID, or agent…"
+            className="w-full bg-slate-950 border border-slate-800 rounded-md pl-8 pr-7 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
+          />
+          {q && (
+            <button
+              type="button"
+              onClick={() => setQ('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <select
+            value={junketFilter}
+            onChange={(e) => setJunketFilter(e.target.value)}
+            aria-label="Junket filter"
+            className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1.5 text-sm text-slate-300 focus:outline-hidden cursor-pointer"
+          >
+            <option value="">All junkets</option>
+            {JUNKETS.map((j) => (
+              <option key={j.value} value={j.value}>
+                {j.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-[13px] font-mono-num text-slate-500 px-1">{filteredGuests.length} rows</span>
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-slate-900 border border-slate-800 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 text-[14px] font-bold">
+                <th className="py-2.5 px-3 whitespace-nowrap">GUEST CODE</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">PLAYER NAME</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">AGENT</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">TELEGRAM ID</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">JUNKETS</th>
+                <th className="py-2.5 px-3 whitespace-nowrap">ACTIVE</th>
+                <th className="py-2.5 px-3 text-right whitespace-nowrap">ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {visibleGuests.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-slate-500">
+                    {guests.length === 0 ? 'No guests yet.' : 'No guests match your search.'}
+                  </td>
+                </tr>
+              ) : (
+                visibleGuests.map((g) => {
+                  const busyRow = rowBusy === g.id;
+                  return (
+                    <tr
+                      key={g.id}
+                      onClick={() => openView(g)}
+                      className="hover:bg-slate-800/40 transition group cursor-pointer"
+                    >
+                      <td className="py-2.5 px-3 whitespace-nowrap font-mono-num text-sm font-bold text-blue-400">
+                        {g.guest_code || '—'}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap text-slate-100 font-semibold">
+                        {g.guest_name}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        {g.agent_name ? (
+                          <span className="font-medium text-slate-200">{g.agent_name}</span>
+                        ) : (
+                          <span className="text-slate-500 text-[14px] italic">Unassigned</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap font-mono-num text-slate-400">
+                        {g.telegram_id ?? '—'}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        {(g.junkets || []).length === 0 ? (
+                          <span className="text-slate-500 text-[14px] italic">—</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5 items-center max-w-md">
+                            {g.junkets.map((j) => {
+                              const meta = JUNKETS.find((jj) => jj.value === j.junket);
+                              return (
+                                <span
+                                  key={j.junket}
+                                  className={`inline-flex items-center gap-1 text-[13px] px-1.5 py-0.5 rounded border font-mono-num ${
+                                    meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
+                                  }`}
+                                >
+                                  <span className="font-bold uppercase tracking-wider">{j.junket}</span>
+                                  {j.account_no ? <span>· {j.account_no}</span> : null}
+                                  {j.commission_rate != null ? <span>· {j.commission_rate}%</span> : null}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <span
+                          className={`text-[13px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm border ${
+                            g.active
+                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                              : 'bg-slate-800 text-slate-400 border-slate-700'
+                          }`}
+                        >
+                          {g.active ? 'Yes' : 'No'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(g)}
+                            disabled={busyRow}
+                            title="Edit"
+                            className="p-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-md transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleActive(g)}
+                            disabled={busyRow}
+                            title={g.active ? 'Deactivate' : 'Activate'}
+                            className="p-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-md transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+                          >
+                            {busyRow ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Power className={`w-3.5 h-3.5 ${g.active ? 'text-emerald-400' : 'text-slate-500'}`} />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setToDelete(g)}
+                            disabled={busyRow}
+                            title="Delete"
+                            className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {filteredGuests.length > 0 ? (
+        <div className="flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="px-3 py-1.5 text-sm font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-lg transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+          >
+            Prev
+          </button>
+          <span className="text-sm text-slate-400">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+            className="px-3 py-1.5 text-sm font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-lg transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
+
+      <Modal
+        open={isModalOpen}
+        onClose={() => !busy && setIsModalOpen(false)}
+        title={editingGuest ? 'Edit Guest' : 'Add Guest'}
+        icon={Users}
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={onSubmit} className="space-y-3 text-sm">
+          <div className="grid grid-cols-2 gap-2.5">
+            <div>
+              <label className="text-slate-400 font-semibold block mb-1 text-[13px] uppercase">Guest code</label>
+              <input
+                value={form.guest_code}
+                onChange={(e) => setForm((f) => ({ ...f, guest_code: e.target.value }))}
+                placeholder="optional"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className="text-slate-400 font-semibold block mb-1 text-[13px] uppercase">Guest name</label>
+              <input
+                value={form.guest_name}
+                onChange={(e) => setForm((f) => ({ ...f, guest_name: e.target.value }))}
+                required
+                className={inputClass}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-slate-400 font-semibold block mb-1 text-[13px] uppercase">Telegram ID</label>
+            <input
+              value={form.telegram_id}
+              onChange={(e) => setForm((f) => ({ ...f, telegram_id: e.target.value }))}
+              placeholder="optional"
+              className={`${inputClass} font-mono-num`}
+            />
+          </div>
+
+          <div>
+            <span className="text-slate-400 font-semibold block mb-1.5 text-[13px] uppercase">Junkets</span>
+            <JunketPicker
+              value={form.junkets}
+              onChange={(junkets) => setForm((f) => ({ ...f, junkets }))}
+              accountsByJunket={accountsByJunket}
+              usedAccounts={usedAccounts}
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(false)}
+              disabled={busy}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-sm font-medium cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition font-bold flex items-center gap-1 text-sm cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+            >
+              <Check className="w-3 h-3" />
+              {busy ? 'Saving…' : editingGuest ? 'Update guest' : 'Add guest'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={!!viewingGuest}
+        onClose={() => setViewingGuest(null)}
+        title={viewingGuest ? `${viewingGuest.guest_name} — Game Records` : ''}
+        icon={Gamepad2}
+        maxWidth="max-w-6xl"
+      >
+        {viewingGuest ? (
+          <div className="space-y-3 text-sm">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+              <div>
+                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Guest Code</span>
+                <span className="font-mono-num text-blue-400 font-bold">{viewingGuest.guest_code || '—'}</span>
+              </div>
+              <div>
+                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Telegram ID</span>
+                <span className="font-mono-num text-slate-200">{viewingGuest.telegram_id ?? '—'}</span>
+              </div>
+              <div>
+                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Agent</span>
+                <span className="text-slate-200">{viewingGuest.agent_name || 'Unassigned'}</span>
+              </div>
+              <div>
+                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Active</span>
+                <span className={viewingGuest.active ? 'text-emerald-400' : 'text-slate-400'}>
+                  {viewingGuest.active ? 'Yes' : 'No'}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[11px] uppercase font-semibold text-slate-500 block mb-1.5">
+                Linked Junket Accounts
+              </span>
+              {(viewingGuest.junkets || []).length === 0 ? (
+                <span className="text-slate-500 text-sm italic">No junket accounts linked.</span>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {viewingGuest.junkets.map((j) => {
+                    const meta = JUNKETS.find((jj) => jj.value === j.junket);
+                    return (
+                      <span
+                        key={j.junket}
+                        className={`inline-flex items-center gap-1 text-[13px] px-2 py-1 rounded border font-mono-num ${
+                          meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
+                        }`}
+                      >
+                        <span className="font-bold uppercase tracking-wider">{j.junket}</span>
+                        {j.account_no ? <span>· {j.account_no}</span> : null}
+                        {j.commission_rate != null ? <span>· {j.commission_rate}%</span> : null}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <span className="text-[11px] uppercase font-semibold text-slate-500 block mb-1.5">Game Records</span>
+
+              {recordsError ? <p className="text-rose-400 text-sm">{recordsError}</p> : null}
+
+              {recordsLoading ? (
+                <p className="text-slate-400 text-sm">Loading…</p>
+              ) : records.length === 0 ? (
+                <div className="p-6 text-center rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                  <Gamepad2 className="w-5 h-5 text-slate-600 mx-auto" />
+                  <p className="text-slate-500 text-sm">No game records yet for this guest's linked accounts.</p>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-slate-800 overflow-auto max-h-80">
+                  <table className="w-full text-left text-[13px] border-collapse min-w-[1100px]">
+                    <thead className="sticky top-0">
+                      <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 text-[11px] font-bold">
+                        <th className="py-2 px-2.5 whitespace-nowrap">DATE</th>
+                        <th className="py-2 px-2.5 whitespace-nowrap">STATUS</th>
+                        <th className="py-2 px-2.5 whitespace-nowrap">JUNKET</th>
+                        <th className="py-2 px-2.5 whitespace-nowrap">GAME NO.</th>
+                        <th className="py-2 px-2.5 whitespace-nowrap">ACCOUNT NO.</th>
+                        <th className="py-2 px-2.5 whitespace-nowrap">PLAYER NAME</th>
+                        <th className="py-2 px-2.5 whitespace-nowrap">AGENT</th>
+                        <th className="py-2 px-2.5 text-right whitespace-nowrap">BUY-IN</th>
+                        <th className="py-2 px-2.5 text-right whitespace-nowrap">CASHOUT</th>
+                        <th className="py-2 px-2.5 text-right whitespace-nowrap">ROLLING</th>
+                        <th className="py-2 px-2.5 text-right whitespace-nowrap">COMMISSION</th>
+                        <th className="py-2 px-2.5 text-right whitespace-nowrap">WIN/LOSS</th>
+                        <th className="py-2 px-2.5 text-right whitespace-nowrap">BALANCE</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 bg-slate-900">
+                      {records.map((r) => (
+                        <tr key={r.id} className="hover:bg-slate-800/40 transition">
+                          <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-400">
+                            {r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}
+                          </td>
+                          <td className="py-2 px-2.5 whitespace-nowrap">
+                            <span
+                              className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded border ${
+                                r.status === 'open'
+                                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                              }`}
+                            >
+                              {r.status === 'open' ? r.step || 'open' : 'settled'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2.5 whitespace-nowrap uppercase font-bold text-[11px] text-slate-300">
+                            {r.junket}
+                          </td>
+                          <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-300">
+                            {r.game_no || '—'}
+                          </td>
+                          <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-300">
+                            {r.account_no || '—'}
+                          </td>
+                          <td className="py-2 px-2.5 whitespace-nowrap text-slate-200">
+                            {r.player_name || '—'}
+                          </td>
+                          <td className="py-2 px-2.5 whitespace-nowrap text-slate-200">
+                            {r.agent_name || '—'}
+                          </td>
+                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
+                            {formatAmount(r.buy_in)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
+                            {formatAmount(r.cashout)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100">
+                            {formatAmount(r.rolling)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-amber-400">
+                            {formatAmount(r.commission)}
+                          </td>
+                          <td
+                            className={`py-2 px-2.5 text-right whitespace-nowrap font-bold ${
+                              Number(r.win_loss) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
+                          >
+                            {formatAmount(r.win_loss)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200 font-mono-num">
+                            {formatAmount(r.balance)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setViewingGuest(null)}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-sm font-medium cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <ConfirmDialog
         open={!!toDelete}
@@ -306,6 +769,6 @@ export default function GuestsPage() {
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}
       />
-    </section>
+    </div>
   );
 }
