@@ -13,12 +13,13 @@ Telegram (agents send text/photos)
 ## Contents
 
 - [How it works](#how-it-works)
+- [Workflow](#workflow)
 - [Tech stack](#tech-stack)
 - [Project structure](#project-structure)
 - [Database](#database)
 - [Settlement parsing](#settlement-parsing)
 - [Realtime updates](#realtime-updates)
-- [Auth](#auth)
+- [Auth & access control](#auth--access-control)
 - [Setup](#setup)
 - [Environment variables](#environment-variables)
 - [Scripts](#scripts)
@@ -31,6 +32,37 @@ Telegram (agents send text/photos)
 4. If parsed, a row is written/updated in `settlements`.
 5. The server **emits an event** on an internal bus; a **WebSocket** layer broadcasts it to every connected browser.
 6. The React UI refetches the relevant table the instant it gets the push — **no polling loop**, the page just reacts to what the server tells it changed.
+
+### Two ways a message gets in
+
+Both call the same shared core, [server/services/ingest.js](server/services/ingest.js) — steps 2–6 above are identical either way:
+
+- **Bot API** (default) — the agent sends text/photo directly to the system bot (`t.me/<botname>`), or to a group the bot is a member of. Needs only `TELEGRAM_BOT_TOKEN` — no login, no 2FA.
+- **Telegram Business** — messages sent to the *account owner's personal chat* reach the bot too, once the owner (needs **Telegram Premium**) connects it under Settings → Telegram Business → Chatbots. Still bot-token only. Telegram does not deliver messages this way when the sender is itself a bot — only 1:1 chats with real users. **One-time prerequisite the bot owner must flip in @BotFather** (not a Bot API setting, so no code controls it): `/mybots` → pick the bot → **Bot Settings** → **Secretary Mode** → turn it **on**. Until that's on, Telegram's Business → Chatbots screen refuses the bot with *"This bot doesn't support Secretary Mode yet."*
+
+## Workflow
+
+### Onboarding a new agent (sends reports to the bot directly)
+1. Send them the bot link: `t.me/<botname>`.
+2. They tap **Start** (or send `/start`) — the bot auto-registers them as an `agent` row (name pulled from their Telegram profile), see `handleStartCommand()` in [server/services/telegram.js](server/services/telegram.js).
+3. Every message they send after that is captured, parsed, and shown live — no further setup on their end.
+
+Already know their Telegram ID ahead of time? Skip step 1–2 and add them straight from the **Agents** page (name + Telegram ID) — once they do message the bot, it matches automatically.
+
+### Covering messages sent to *your own* personal chat (not the bot)
+Use this when someone messages **you** directly instead of the bot — e.g. a junket group ("Infinity Cage Management") or a source that only ever DMs a person. Requires **Telegram Premium** on the receiving account:
+1. In @BotFather: `/mybots` → the bot → **Bot Settings** → enable **Secretary Mode** (one-time per bot, see above). Until this is on, step 2 fails with *"This bot doesn't support Secretary Mode yet."*
+2. In Telegram, on the account that will receive the messages: **Settings → Telegram Business → Chatbots** → connect the bot.
+3. Under **"Chats the bot can access"**, pick **"Only Selected Chats"**, then under **Included chats** tap **Select Chats** and add each chat/group you want captured (e.g. the junket management group, a specific contact).
+4. Under **Bot permissions**, make sure **Manage Messages** is **ON**. The other toggles (Manage Profile, Gifts and Stars, Stories) aren't needed. The app logs `business connection enabled (owner=<telegram id>, id=<connection id>)` once the connection lands.
+5. **Verify:** have someone send a test message in one of the included chats, then check the **Messages** page (and **Settlements**, if it's a report) in the dashboard to confirm it landed.
+
+This does **not** cover messages from another *bot* DMing that personal account, or (unconfirmed) whether group chats forward the same way as 1:1 chats — Telegram never relays bot-sent DMs over a Business connection regardless of setup, and only 1:1 personal-chat delivery is confirmed working in this project so far. There is deliberately no workaround for the bot-DMs-owner case (see `.claude/skills/architecture/SKILL.md` → History) — the closest options are getting that source to message the bot directly, or a manual forward.
+
+### Scoping a login to one agent
+By default every dashboard login is an **admin** (sees every agent's data). To give one person a login that only shows their own messages/settlements:
+1. Make sure they exist on the **Agents** page.
+2. Go to **Users** → add a login, and pick their name under "Scope to agent" instead of leaving it on "Admin". See [Auth & access control](#auth--access-control).
 
 ## Tech stack
 
@@ -55,18 +87,20 @@ server/
     auth.js              Express middleware — verifies Bearer JWT
   routes/                 one router per resource, mounted under /api
     authRoutes.js          POST /login, GET /me
-    agentRoutes.js          GET/POST /agents  (registered Telegram senders)
-    messageRoutes.js        GET /messages, DELETE /messages (clear all)
-    settlementRoutes.js     GET /settlements, DELETE /settlements (clear all)
+    agentRoutes.js          GET/POST/PUT/DELETE /agents  (admin-only)
+    userRoutes.js            GET/POST/PUT/DELETE /users  (admin-only, dashboard logins)
+    messageRoutes.js        GET /messages, DELETE /messages (clear all, admin-only)
+    settlementRoutes.js     GET /settlements, DELETE /settlements (clear all, admin-only)
     index.js                 wires routers + public POST /telegram/webhook
   controllers/            request handlers — thin, call into models
   models/                  SQL queries (mysql2 named placeholders)
-    messageModel.js
+    messageModel.js          includes the (chat_id, message_id) duplicate guard
     settlementModel.js      includes the step-by-step upsert logic (see below)
-    agentModel.js
-    userModel.js
+    agentModel.js             agents CRUD (name/telegram_id/is_active)
+    userModel.js              dashboard logins CRUD, agent_id link, admin-count safety checks
   services/
-    telegram.js             long-poll loop / webhook handler, OCR, message intake
+    telegram.js             long-poll loop / webhook handler, OCR, message + business_message intake
+    ingest.js                shared "save message + parse + emit" core
     settlementParse.js       regex-based extraction per report format
     events.js                tiny EventEmitter bus (message/settlement events)
 
@@ -82,7 +116,8 @@ src/
     LoginPage.jsx
     SettlementsPage.jsx        main table: filters, totals, live status, clear-data
     InboxPage.jsx               raw message log: search, live status, clear-data
-    AgentsPage.jsx               register Telegram ID -> agent name mapping
+    AgentsPage.jsx               register/edit/deactivate Telegram ID -> agent mapping
+    UsersPage.jsx                dashboard logins: create, scope to an agent, reset password, delete
 
 sql/schema.sql            reference schema (server also self-migrates on boot)
 scripts/test-parse.mjs    run parser against sample messages for every format
@@ -93,8 +128,8 @@ vite.config.js             dev server: proxies /api and /ws to the API port
 
 Four tables (see [sql/schema.sql](sql/schema.sql); `ensureTable()` in each model creates/migrates them automatically on server start):
 
-- **users** — dashboard login (seeded from `ADMIN_USERNAME`/`ADMIN_PASSWORD` on first boot)
-- **agents** — maps a Telegram user ID to a display name; messages from unregistered IDs still get logged, just tagged "Unmatched"
+- **users** — dashboard logins (seeded from `ADMIN_USERNAME`/`ADMIN_PASSWORD` on first boot). `agent_id` links a login to one `agents` row — `NULL` means admin (sees every agent's data); set means scoped to that agent's own messages/settlements only. Managed from the **Users** page.
+- **agents** — maps a Telegram user ID to a display name; messages from unregistered IDs still get logged, just tagged "Unmatched". `is_active` deactivates without losing history. Managed from the **Agents** page.
 - **message_logs** — every inbound Telegram message, raw text, sender, chat ID
 - **settlements** — the parsed structured data; `message_id` links back to the source message
 
@@ -134,9 +169,16 @@ No client-side polling loop. Flow:
 
 Telegram delivery itself (bot → server) is separate from this and is **not** WebSocket-based — see below.
 
-## Auth
+## Auth & access control
 
-JWT-based. `POST /api/auth/login` returns a token (12h expiry), stored in `localStorage` and sent as `Authorization: Bearer <token>` on every request ([src/api.js](src/api.js)). Any 401 response — REST or a failed WebSocket handshake — clears the token and bounces the user back to `/login` ([AuthContext.jsx](src/AuthContext.jsx)).
+JWT-based. `POST /api/auth/login` returns a token (12h expiry, carries `agentId`), stored in `localStorage` and sent as `Authorization: Bearer <token>` on every request ([src/api.js](src/api.js)). Any 401 response — REST or a failed WebSocket handshake — clears the token and bounces the user back to `/login` ([AuthContext.jsx](src/AuthContext.jsx)).
+
+Two kinds of login, distinguished by `users.agent_id`:
+
+- **Admin** (`agent_id` is `NULL`) — sees every agent's `message_logs`/`settlements`; the only role that can reach the **Agents** and **Users** pages, or clear data (`DELETE /messages`, `DELETE /settlements`). Enforced server-side by `requireAdmin` in [server/middleware/auth.js](server/middleware/auth.js), applied per-route.
+- **Scoped** (`agent_id` set) — `messageModel.list()`/`settlementModel.list()` add `WHERE agent_id = :agentId`, so the login only ever sees that one agent's data. The sidebar hides Agents/Users for this role too ([src/App.jsx](src/App.jsx)).
+
+At least one admin login must always exist — `userController.js` blocks deleting or re-scoping the last one so nobody can lock everyone out of account-wide management.
 
 ## Setup
 

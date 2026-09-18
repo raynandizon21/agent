@@ -7,8 +7,17 @@ export async function ensureAdminUser() {
   if (await userModel.hasAnyUser()) return;
 
   const passwordHash = await bcrypt.hash(config.adminPassword, 10);
-  await userModel.createUser(config.adminUsername, passwordHash);
+  await userModel.createUser(config.adminUsername, passwordHash, null);
   console.log(`Seeded admin user: ${config.adminUsername}`);
+}
+
+function toUserView(u) {
+  return {
+    id: u.id,
+    username: u.username,
+    agentId: u.agent_id ?? null,
+    agentName: u.agent_name ?? null,
+  };
 }
 
 export async function login(req, res) {
@@ -25,15 +34,12 @@ export async function login(req, res) {
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign(
-      { sub: user.id, username: user.username },
+      { sub: user.id, username: user.username, agentId: user.agent_id ?? null },
       config.jwtSecret,
       { expiresIn: '12h' }
     );
 
-    return res.json({
-      token,
-      user: { id: user.id, username: user.username },
-    });
+    return res.json({ token, user: toUserView(user) });
   } catch (err) {
     console.error('login error', err);
     return res.status(500).json({ error: 'Login failed' });
@@ -41,7 +47,12 @@ export async function login(req, res) {
 }
 
 export async function me(req, res) {
-  return res.json({
-    user: { id: req.user.sub, username: req.user.username },
-  });
+  try {
+    const user = await userModel.findById(req.user.sub);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    return res.json({ user: toUserView(user) });
+  } catch (err) {
+    console.error('me error', err);
+    return res.status(500).json({ error: 'Failed to load user' });
+  }
 }

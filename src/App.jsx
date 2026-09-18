@@ -3,8 +3,9 @@ import { AuthProvider, useAuth } from './AuthContext';
 import AgentsPage from './pages/AgentsPage';
 import InboxPage from './pages/InboxPage';
 import LoginPage from './pages/LoginPage';
-import SettingsPage from './pages/SettingsPage';
 import SettlementsPage from './pages/SettlementsPage';
+import TelegramSettingsPage from './pages/TelegramSettingsPage';
+import UsersPage from './pages/UsersPage';
 
 function Shell() {
   const { user, loading, logout } = useAuth();
@@ -17,6 +18,10 @@ function Shell() {
     return <Navigate to="/login" replace />;
   }
 
+  // A login linked to an agent only ever sees that agent's own data — the
+  // agent directory and login management are account-wide, admin only.
+  const isAdmin = user.agentId == null;
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -26,11 +31,20 @@ function Shell() {
             Settlements
           </NavLink>
           <NavLink to="/messages">Messages</NavLink>
-          <NavLink to="/settings">Settings</NavLink>
-          {/* <NavLink to="/agents">Agents</NavLink> */}
+          {isAdmin ? <NavLink to="/agents">Agents</NavLink> : null}
+          {isAdmin ? <NavLink to="/users">Users</NavLink> : null}
+          {isAdmin ? <NavLink to="/telegram">Telegram</NavLink> : null}
         </nav>
         <div className="sidebar-foot">
-          <span className="muted">{user.username}</span>
+          <span className="muted">
+            {user.username}
+            {!isAdmin ? (
+              <>
+                {' '}
+                <span className="badge">{user.agentName || 'agent'}</span>
+              </>
+            ) : null}
+          </span>
           <button type="button" className="ghost" onClick={logout}>
             Log out
           </button>
@@ -43,6 +57,12 @@ function Shell() {
   );
 }
 
+function AdminOnly({ children }) {
+  const { user } = useAuth();
+  if (user && user.agentId != null) return <Navigate to="/" replace />;
+  return children;
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -51,9 +71,31 @@ export default function App() {
         <Route element={<Shell />}>
           <Route path="/" element={<SettlementsPage />} />
           <Route path="/messages" element={<InboxPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settlements" element={<Navigate to="/" replace />} />
-          <Route path="/agents" element={<AgentsPage />} />
+          <Route
+            path="/agents"
+            element={
+              <AdminOnly>
+                <AgentsPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <AdminOnly>
+                <UsersPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/telegram"
+            element={
+              <AdminOnly>
+                <TelegramSettingsPage />
+              </AdminOnly>
+            }
+          />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -1,20 +1,49 @@
 import { createWorker } from 'tesseract.js';
 import { config } from '../db.js';
 import * as agentModel from '../models/agentModel.js';
-import * as messageModel from '../models/messageModel.js';
-import * as settlementModel from '../models/settlementModel.js';
-import { bus, Events } from './events.js';
-import { parseSettlement } from './settlementParse.js';
+import * as botConfigModel from '../models/botConfigModel.js';
+import * as userModel from '../models/userModel.js';
+import { ingestMessage } from './ingest.js';
 
-const API = `https://api.telegram.org/bot${config.telegramBotToken}`;
-const FILE_API = `https://api.telegram.org/file/bot${config.telegramBotToken}`;
+// Mutable — the bot token lives in the `bot_config` DB table
+// (server/models/botConfigModel.js), not .env, so the Telegram API admin
+// page can change it and have it take effect immediately, no server
+// restart needed. Seeded from that table in startTelegram(); a later save
+// calls setBotToken() below directly.
+let botToken = config.telegramBotToken || '';
+
+// Delay before retrying after a failed getUpdates call (network blip,
+// Telegram hiccup, etc). Not configurable — nobody ever needed it to be,
+// it was just an unused knob sitting in the database.
+const POLL_RETRY_MS = 2000;
+
+function apiBase() {
+  return `https://api.telegram.org/bot${botToken}`;
+}
+function fileApiBase() {
+  return `https://api.telegram.org/file/bot${botToken}`;
+}
+
+export function setBotToken(token) {
+  botToken = token || '';
+  console.log('[telegram] bot token updated — applied live, no restart needed');
+}
 
 let offset = 0;
 let running = false;
 let ocrWorker = null;
 
+// business_connection_id -> { id, username } of the owner (the Premium
+// account that connected this bot under Settings > Telegram Business >
+// Chatbots). Used to (a) tell "the account owner sent this from their phone"
+// apart from "someone sent this to the owner's business chat" — both arrive
+// as business_message — and (b) attribute business-sourced reports to the
+// owner's own agent record rather than the external sender (see
+// saveIncomingBusinessMessage).
+const businessOwnerCache = new Map();
+
 async function tg(method, body) {
-  const res = await fetch(`${API}/${method}`, {
+  const res = await fetch(`${apiBase()}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
@@ -70,9 +99,27 @@ async function handleStartCommand(msg) {
 
   if (agent?.created) {
     console.log(`[telegram] agent created from /start: ${name} (${from.id})`);
+
+    // Auto-provision a dashboard login scoped to just this agent's own
+    // data — the agent's real Telegram @username when they have one,
+    // falling back to agent_<telegram_id> otherwise (see ensureLoginForAgent).
+    let loginLine = '';
+    try {
+      const login = await userModel.ensureLoginForAgent({
+        agentId: agent.id,
+        telegramUsername: from.username ?? null,
+        telegramId: from.id,
+      });
+      if (login) {
+        loginLine = `\n\nDashboard login — username: ${login.username}, password: ${login.password} (please change it after logging in).`;
+      }
+    } catch (err) {
+      console.error('[telegram] auto-create login failed', err.message || err);
+    }
+
     await tg('sendMessage', {
       chat_id: chatId,
-      text: `Registered as agent: ${name}`,
+      text: `Registered as agent: ${name}${loginLine}`,
     });
   } else {
     console.log(`[telegram] /start existing agent: ${name} (${from.id})`);
@@ -96,7 +143,7 @@ async function downloadTelegramFile(fileId) {
   if (!file.file_path) {
     throw new Error('Telegram file_path missing');
   }
-  const res = await fetch(`${FILE_API}/${file.file_path}`);
+  const res = await fetch(`${fileApiBase()}/${file.file_path}`);
   if (!res.ok) {
     throw new Error(`Download failed: ${res.status}`);
   }
@@ -136,6 +183,72 @@ async function resolveMessageText(msg) {
   return captionOrText || ocrText;
 }
 
+// Resolve (and cache) the Business account owner ({ id, username }) for a
+// given connection. Populated eagerly from `business_connection` updates;
+// falls back to an API call so a bot restart doesn't lose the mapping.
+async function getBusinessOwner(connectionId) {
+  if (businessOwnerCache.has(connectionId)) return businessOwnerCache.get(connectionId);
+  try {
+    const conn = await tg('getBusinessConnection', { business_connection_id: connectionId });
+    const owner = conn?.user?.id ? { id: conn.user.id, username: conn.user.username ?? null } : null;
+    businessOwnerCache.set(connectionId, owner);
+    return owner;
+  } catch (err) {
+    console.error('[telegram] getBusinessConnection failed', err.message || err);
+    return null;
+  }
+}
+
+function handleBusinessConnection(conn) {
+  if (!conn?.id || !conn?.user?.id) return;
+  businessOwnerCache.set(conn.id, { id: conn.user.id, username: conn.user.username ?? null });
+  console.log(
+    `[telegram] business connection ${conn.is_enabled ? 'enabled' : 'disabled'} ` +
+      `(owner=${conn.user.id}, id=${conn.id})`
+  );
+}
+
+// A message delivered via a Telegram Business connection (Settings > Telegram
+// Business > Chatbots) — reaches the bot with just the bot token, no
+// api_id/api_hash/2FA. Covers 1:1 chats with real users only; Telegram never
+// delivers a bot-sent message this way.
+//
+// Attribution: the report is logged under the *connection owner's* own agent
+// record (whoever connected the bot to their personal Telegram), not the
+// external sender — this is "whatever lands in <owner>'s personal inbox",
+// tracked as that owner's own data, same as messages they'd send the bot
+// directly. The external sender's id/username aren't a registered agent
+// concept in this system.
+async function saveIncomingBusinessMessage(msg) {
+  const connectionId = msg.business_connection_id;
+  const owner = connectionId ? await getBusinessOwner(connectionId) : null;
+
+  // Messages the account owner sends themselves (from their own phone) are
+  // also relayed here for UI parity — skip them, we only want inbound data.
+  if (owner && msg.from?.id === owner.id) return;
+
+  const text = await resolveMessageText(msg);
+  if (!text.trim()) return;
+  if (!msg.photo?.length && isBotCommand(text)) return;
+
+  const chatId = msg.chat?.id ?? null;
+  const userId = owner?.id ?? null;
+  const username = owner?.username ?? null;
+
+  const result = await ingestMessage({
+    text,
+    chatId,
+    userId,
+    username,
+    messageId: msg.message_id ?? null,
+  });
+
+  console.log(
+    `[telegram] (business) saved for owner ${username || userId} chat=${chatId} ` +
+      `agent=${result.agentId ?? 'unmatched'}${result.matched ? ' (settlement)' : ''}`
+  );
+}
+
 async function saveIncomingMessage(msg) {
   const rawText = (msg.text || msg.caption || '').trim();
 
@@ -154,58 +267,22 @@ async function saveIncomingMessage(msg) {
   // Only skip pure command messages (not photo OCR results)
   if (!msg.photo?.length && isBotCommand(text)) return;
 
-  const chatId = msg.chat?.id;
+  const chatId = msg.chat?.id ?? null;
   const userId = msg.from?.id ?? null;
   const username = msg.from?.username ?? null;
-  const agentId = userId
-    ? await agentModel.findActiveIdByTelegramId(userId)
-    : null;
 
-  const messageId = await messageModel.createIncoming({
-    agentId,
+  const result = await ingestMessage({
+    text,
     chatId,
     userId,
     username,
-    text,
     messageId: msg.message_id ?? null,
   });
 
   console.log(
-    `[telegram] saved from ${username || userId} chat=${chatId} agent=${agentId ?? 'unmatched'}`
+    `[telegram] saved from ${username || userId} chat=${chatId} ` +
+      `agent=${result.agentId ?? 'unmatched'}${result.matched ? ' (settlement)' : ''}`
   );
-
-  bus.emit(Events.MESSAGE, { id: messageId, agentId });
-
-  try {
-    const parsed = parseSettlement(text);
-    if (parsed && parsed.step === 'delete') {
-      await settlementModel.deleteGame(parsed);
-      console.log(
-        `[telegram] ${parsed.junket} delete account=${parsed.account_no} game=${parsed.game_no}`
-      );
-      bus.emit(Events.SETTLEMENT, { messageId, agentId, junket: parsed.junket, step: 'delete' });
-    } else if (parsed && parsed.step) {
-      // Step-by-step game: merge into the open row for this account+game#.
-      await settlementModel.upsertStep(parsed, { messageId, agentId, raw_text: text });
-      console.log(
-        `[telegram] ${parsed.junket} ${parsed.step} account=${parsed.account_no} game=${parsed.game_no}`
-      );
-      bus.emit(Events.SETTLEMENT, { messageId, agentId, junket: parsed.junket, step: parsed.step });
-    } else if (parsed) {
-      await settlementModel.create({
-        ...parsed,
-        messageId,
-        agentId,
-        raw_text: text,
-      });
-      console.log(
-        `[telegram] settlement ${parsed.junket} account=${parsed.account_no || '?'}`
-      );
-      bus.emit(Events.SETTLEMENT, { messageId, agentId, junket: parsed.junket });
-    }
-  } catch (err) {
-    console.error('[telegram] settlement parse/save failed', err.message || err);
-  }
 }
 
 async function processUpdate(update) {
@@ -215,6 +292,14 @@ async function processUpdate(update) {
     } catch (err) {
       console.error('[telegram] save failed', err);
     }
+  } else if (update?.business_message) {
+    try {
+      await saveIncomingBusinessMessage(update.business_message);
+    } catch (err) {
+      console.error('[telegram] business save failed', err);
+    }
+  } else if (update?.business_connection) {
+    handleBusinessConnection(update.business_connection);
   }
 }
 
@@ -222,7 +307,7 @@ async function pollOnce() {
   const updates = await tg('getUpdates', {
     offset,
     timeout: 25,
-    allowed_updates: ['message'],
+    allowed_updates: ['message', 'business_connection', 'business_message'],
   });
 
   for (const update of updates) {
@@ -245,7 +330,7 @@ function startLongPolling() {
         await pollOnce();
       } catch (err) {
         console.error('[telegram] poll error', err.message || err);
-        await new Promise((r) => setTimeout(r, config.telegramPollMs));
+        await new Promise((r) => setTimeout(r, POLL_RETRY_MS));
       }
     }
   };
@@ -257,7 +342,7 @@ async function startWebhookMode() {
   await tg('setWebhook', {
     url,
     secret_token: config.telegramWebhookSecret,
-    allowed_updates: ['message'],
+    allowed_updates: ['message', 'business_connection', 'business_message'],
     drop_pending_updates: false,
   });
   console.log(`[telegram] webhook registered -> ${url}`);
@@ -278,9 +363,28 @@ export async function telegramWebhookHandler(req, res) {
   );
 }
 
-export function startTelegram() {
+export async function startTelegram() {
   if (running) return;
   running = true;
+
+  // Load the current token from bot_config — the .env value above is only
+  // the first-boot seed (see botConfigModel.ensureTable); this DB row is
+  // the real source of truth from here on.
+  try {
+    const row = await botConfigModel.get();
+    if (row?.bot_token) botToken = row.bot_token;
+  } catch (err) {
+    console.error('[telegram] failed to load bot_config, using .env fallback', err.message || err);
+  }
+
+  if (!botToken) {
+    console.error(
+      '[telegram] no bot token configured (bot_config table is empty and ' +
+        'TELEGRAM_BOT_TOKEN is unset) — set one on the Telegram API admin page.'
+    );
+    running = false;
+    return;
+  }
 
   warmOcr(); // warm OCR in background so first photo is faster
 

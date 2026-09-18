@@ -97,7 +97,8 @@ label {
   font-size: 0.9rem;
 }
 
-input {
+input,
+select {
   background: var(--bg-elev);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -105,8 +106,37 @@ input {
   padding: 10px 12px;
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-color: var(--accent);
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.row-actions button {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.badge.role-receiver {
+  color: var(--accent);
   border-color: var(--accent);
 }
 
@@ -285,6 +315,14 @@ main {
   background: color-mix(in srgb, var(--panel) 85%, transparent);
 }
 
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -320,6 +358,9 @@ tr:last-child td {
 .msg {
   white-space: pre-wrap;
   max-width: 520px;
+  max-height: 4.6em;
+  overflow-y: auto;
+  line-height: 1.15;
 }
 
 .empty {
@@ -359,7 +400,7 @@ tr:last-child td {
   text-transform: uppercase;
 }
 
-.badge.junket-infinitycage {
+.badge.junket-infinity {
   background: color-mix(in srgb, #46c9a8 28%, transparent);
   color: #aef0e0;
   text-transform: uppercase;
@@ -426,8 +467,105 @@ tr:last-child td {
     border-bottom: 1px solid var(--line);
   }
 
+  .sidebar nav {
+    grid-auto-flow: column;
+    overflow-x: auto;
+    gap: 4px;
+  }
+
+  .sidebar nav a {
+    white-space: nowrap;
+  }
+
   main {
-    padding: 18px;
+    padding: 14px;
+  }
+
+  .page-head h1 {
+    font-size: 1.4rem;
+  }
+}
+
+/* Responsive table -> card layout. Applies to any `.table-wrap table` (not
+   just settlements) so Messages/Agents/Users get the same treatment for
+   free. Below the breakpoint, the header row hides and each <tr> becomes a
+   self-contained card; every <td> shows its column name (from data-label,
+   set in the page's JSX) on the left and the value on the right — no more
+   side-scrolling a 1100px-wide table on a phone. */
+@media (max-width: 720px) {
+  .table-wrap {
+    overflow: visible;
+    border: none;
+    background: transparent;
+  }
+
+  .table-wrap table,
+  .settlements-table {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .table-wrap thead {
+    display: none;
+  }
+
+  .table-wrap tbody,
+  .table-wrap tr {
+    display: block;
+  }
+
+  .table-wrap tr {
+    background: color-mix(in srgb, var(--panel) 85%, transparent);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    padding: 4px 14px;
+  }
+
+  .table-wrap tr.totals-row {
+    background: color-mix(in srgb, var(--panel) 95%, #000);
+  }
+
+  .table-wrap td,
+  .settlements-table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: right;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+    border-top: none !important;
+  }
+
+  .table-wrap tr:last-child,
+  .table-wrap tr {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .table-wrap td:last-child {
+    border-bottom: none;
+  }
+
+  .table-wrap td[data-label]::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  /* Empty-state / colspan cells have no data-label pairing to show */
+  .table-wrap td.empty {
+    display: block;
+    text-align: center;
+  }
+
+  .row-actions {
+    justify-content: flex-end;
   }
 }
 

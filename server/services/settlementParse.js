@@ -362,7 +362,7 @@ function parseInfinityCage(text) {
   // step === 'delete' -> no fields; telegram.js removes the row
 
   return {
-    junket: 'infinitycage',
+    junket: 'infinity',
     account_no,
     player_name: guest || acctSuffix || null,
     game_no,

@@ -9,13 +9,8 @@ dist/
 *.session
 *.session-journal
 
-# python (telegram-forwarder)
-.venv/
-venv/
-__pycache__/
-*.pyc
-
 # logs / os
 *.log
 *.log.*
 .DS_Store
+backup_before_rename.sql

@@ -29,6 +29,8 @@ function sumField(rows, key) {
   }, 0);
 }
 
+const PAGE_SIZE = 12;
+
 export default function SettlementsPage() {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState('');
@@ -38,11 +40,17 @@ export default function SettlementsPage() {
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedQ(q), 300);
     return () => clearTimeout(id);
   }, [q]);
+
+  // Filters changed — start back at page 1 instead of showing a stale/empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQ, junket]);
 
   const load = useCallback(async () => {
     setError('');
@@ -104,6 +112,14 @@ export default function SettlementsPage() {
     [rows]
   );
 
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  // A refetch can shrink the row count (e.g. after Clear data) — keep the
+  // current page from pointing past the end.
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+  const pagedRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   return (
     <section className="page">
       <header className="page-head">
@@ -125,7 +141,7 @@ export default function SettlementsPage() {
             <option value="win9">Win9</option>
             <option value="galaxy">Galaxy</option>
             <option value="democage">Demo Cage</option>
-            <option value="infinitycage">Infinity Cage</option>
+            <option value="infinity">Infinity</option>
           </select>
           <input
             placeholder="Search account, player, game no…"
@@ -162,55 +178,60 @@ export default function SettlementsPage() {
           <thead>
             <tr>
               <th>Date</th>
-              <th>Junket</th>
               <th>Status</th>
-              <th>Agent</th>
-              <th>Account No.</th>
-              <th>Account Name</th>
-              <th>Player Name</th>
+              <th>Junket</th>
               <th>Game No.</th>
+              <th>Account No.</th>
+              <th>Player Name</th>
+              <th>Agent</th>
               <th>Buy-in</th>
               <th>Cashout</th>
-              <th>Win/Loss</th>
               <th>Rolling</th>
               <th>Commission</th>
+              <th>Win/Loss</th>
               <th>Balance</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && !loading ? (
               <tr>
-                <td colSpan={14} className="empty">
+                <td colSpan={13} className="empty">
                   No settlements yet.
                 </td>
               </tr>
             ) : (
-              rows.map((s) => (
+              pagedRows.map((s) => (
                 <tr key={s.id}>
-                  <td className="mono">{formatWhen(s.settled_at || s.created_at)}</td>
-                  <td>
-                    <span className={`badge junket-${s.junket}`}>{s.junket}</span>
-                  </td>
-                  <td>
+                  <td className="mono" data-label="Date">{formatWhen(s.settled_at || s.created_at)}</td>
+                  <td data-label="Status">
                     <span className={`badge status-${s.status}`}>
                       {s.status === 'open' ? s.step || 'open' : 'settled'}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Junket">
+                    <span className={`badge junket-${s.junket}`}>{s.junket}</span>
+                  </td>
+                  <td className="mono" data-label="Game No.">{s.game_no || '—'}</td>
+                  <td className="mono" data-label="Account No.">
+                    <div style={{ whiteSpace: 'nowrap' }}>{s.account_no || '—'}</div>
+                    {s.account_name ? (
+                      <div className="muted" style={{ whiteSpace: 'nowrap' }}>
+                        {s.account_name}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td data-label="Player Name">{s.player_name || '—'}</td>
+                  <td data-label="Agent">
                     {s.agent_name || (
                       <span className="badge warn">Unmatched</span>
                     )}
                   </td>
-                  <td className="mono">{s.account_no || '—'}</td>
-                  <td>{s.account_name || '—'}</td>
-                  <td>{s.player_name || '—'}</td>
-                  <td className="mono">{s.game_no || '—'}</td>
-                  <td className="mono num">{formatAmount(s.buy_in)}</td>
-                  <td className="mono num">{formatAmount(s.cashout)}</td>
-                  <td className="mono num">{formatAmount(s.win_loss)}</td>
-                  <td className="mono num">{formatAmount(s.rolling)}</td>
-                  <td className="mono num">{formatAmount(s.commission)}</td>
-                  <td className="mono num">{formatAmount(s.balance)}</td>
+                  <td className="mono num" data-label="Buy-in">{formatAmount(s.buy_in)}</td>
+                  <td className="mono num" data-label="Cashout">{formatAmount(s.cashout)}</td>
+                  <td className="mono num" data-label="Rolling">{formatAmount(s.rolling)}</td>
+                  <td className="mono num" data-label="Commission">{formatAmount(s.commission)}</td>
+                  <td className="mono num" data-label="Win/Loss">{formatAmount(s.win_loss)}</td>
+                  <td className="mono num" data-label="Balance">{formatAmount(s.balance)}</td>
                 </tr>
               ))
             )}
@@ -218,18 +239,42 @@ export default function SettlementsPage() {
           {rows.length > 0 ? (
             <tfoot>
               <tr className="totals-row">
-                <td colSpan={8}>Total</td>
-                <td className="mono num">{formatAmount(totals.buy_in)}</td>
-                <td className="mono num">{formatAmount(totals.cashout)}</td>
-                <td className="mono num">{formatAmount(totals.win_loss)}</td>
-                <td className="mono num">{formatAmount(totals.rolling)}</td>
-                <td className="mono num">{formatAmount(totals.commission)}</td>
-                <td></td>
+                <td colSpan={7} data-label="Total">Total</td>
+                <td className="mono num" data-label="Buy-in">{formatAmount(totals.buy_in)}</td>
+                <td className="mono num" data-label="Cashout">{formatAmount(totals.cashout)}</td>
+                <td className="mono num" data-label="Rolling">{formatAmount(totals.rolling)}</td>
+                <td className="mono num" data-label="Commission">{formatAmount(totals.commission)}</td>
+                <td className="mono num" data-label="Win/Loss">{formatAmount(totals.win_loss)}</td>
+                <td data-label="Balance"></td>
               </tr>
             </tfoot>
           ) : null}
         </table>
       </div>
+
+      {rows.length > 0 ? (
+        <div className="pager">
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+          >
+            Prev
+          </button>
+          <span className="muted">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

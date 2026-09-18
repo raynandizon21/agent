@@ -4,65 +4,85 @@ CREATE DATABASE IF NOT EXISTS agent_telegram_inbox
 
 USE agent_telegram_inbox;
 
+-- Column names are ALL_CAPS with the primary key as IDNo and any foreign
+-- key right after it, matching this org's usual DB convention (see e.g.
+-- the junket system's own tables). The Node app aliases every query back
+-- to lowercase keys (id, name, telegram_id, ...) so this is purely a DB-
+-- level convention — no API/frontend shape depends on it.
+
 CREATE TABLE IF NOT EXISTS users (
-  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  username VARCHAR(64) NOT NULL UNIQUE,
-  password_hash VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  IDNo INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  -- NULL = admin login (sees every agent's data). Set = scoped to that one
+  -- agent's messages/settlements only. No FK constraint, same as AGENT_ID
+  -- on message_logs/settlements below.
+  AGENT_ID INT UNSIGNED NULL,
+  USERNAME VARCHAR(64) NOT NULL UNIQUE,
+  PASSWORD_HASH VARCHAR(255) NOT NULL,
+  CREATED_AT TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS agents (
-  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(120) NOT NULL,
-  telegram_id BIGINT NOT NULL UNIQUE,
-  is_active TINYINT(1) NOT NULL DEFAULT 1,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  IDNo INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  NAME VARCHAR(120) NOT NULL,
+  TELEGRAM_ID BIGINT NOT NULL UNIQUE,
+  IS_ACTIVE TINYINT(1) NOT NULL DEFAULT 1,
+  CREATED_AT TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- Singleton row (IDNo=1) — there's only ever one bot.
+CREATE TABLE IF NOT EXISTS bot_config (
+  IDNo TINYINT UNSIGNED PRIMARY KEY DEFAULT 1,
+  BOT_TOKEN VARCHAR(255) NULL,
+  UPDATED_AT TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS message_logs (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  agent_id INT UNSIGNED NULL,
-  telegram_chat_id BIGINT NOT NULL,
-  telegram_user_id BIGINT NULL,
-  telegram_username VARCHAR(64) NULL,
-  message_text TEXT NOT NULL,
-  telegram_message_id BIGINT NULL,
-  received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_received_at (received_at),
-  INDEX idx_chat_id (telegram_chat_id),
+  IDNo BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  AGENT_ID INT UNSIGNED NULL,
+  TELEGRAM_CHAT_ID BIGINT NOT NULL,
+  TELEGRAM_USER_ID BIGINT NULL,
+  TELEGRAM_USERNAME VARCHAR(64) NULL,
+  MESSAGE_TEXT TEXT NOT NULL,
+  TELEGRAM_MESSAGE_ID BIGINT NULL,
+  RECEIVED_AT TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_received_at (RECEIVED_AT),
+  INDEX idx_chat_id (TELEGRAM_CHAT_ID),
+  -- Guards against re-processing the same Telegram update twice (e.g. a
+  -- server restart re-delivering an unconfirmed long-poll offset).
+  UNIQUE KEY uq_message_logs_chat_msg (TELEGRAM_CHAT_ID, TELEGRAM_MESSAGE_ID),
   CONSTRAINT fk_message_agent
-    FOREIGN KEY (agent_id) REFERENCES agents(id)
+    FOREIGN KEY (AGENT_ID) REFERENCES agents(IDNo)
     ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS settlements (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  message_id BIGINT UNSIGNED NULL,
-  agent_id INT UNSIGNED NULL,
-  junket VARCHAR(32) NOT NULL,
-  account_no VARCHAR(120) NULL,
-  account_name VARCHAR(255) NULL,
-  player_name VARCHAR(512) NULL,
-  game_no VARCHAR(64) NULL,
-  buy_in BIGINT NULL,
-  cashout BIGINT NULL,
-  win_loss BIGINT NULL,
-  rolling BIGINT NULL,
-  commission BIGINT NULL,
-  balance BIGINT NULL,
-  settled_at DATETIME NULL,
-  raw_text MEDIUMTEXT NULL,
-  status VARCHAR(16) NOT NULL DEFAULT 'settled',
-  step VARCHAR(32) NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_settlements_created (created_at),
-  INDEX idx_settlements_junket (junket),
-  INDEX idx_settlements_account (account_no),
-  INDEX idx_settlements_open_game (junket, account_no, game_no, status),
+  IDNo BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MESSAGE_ID BIGINT UNSIGNED NULL,
+  AGENT_ID INT UNSIGNED NULL,
+  JUNKET VARCHAR(32) NOT NULL,
+  ACCOUNT_NO VARCHAR(120) NULL,
+  ACCOUNT_NAME VARCHAR(255) NULL,
+  PLAYER_NAME VARCHAR(512) NULL,
+  GAME_NO VARCHAR(64) NULL,
+  BUY_IN BIGINT NULL,
+  CASHOUT BIGINT NULL,
+  WIN_LOSS BIGINT NULL,
+  ROLLING BIGINT NULL,
+  COMMISSION BIGINT NULL,
+  BALANCE BIGINT NULL,
+  SETTLED_AT DATETIME NULL,
+  RAW_TEXT MEDIUMTEXT NULL,
+  STATUS VARCHAR(16) NOT NULL DEFAULT 'settled',
+  STEP VARCHAR(32) NULL,
+  CREATED_AT TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_settlements_created (CREATED_AT),
+  INDEX idx_settlements_junket (JUNKET),
+  INDEX idx_settlements_account (ACCOUNT_NO),
+  INDEX idx_settlements_open_game (JUNKET, ACCOUNT_NO, GAME_NO, STATUS),
   CONSTRAINT fk_settlement_message
-    FOREIGN KEY (message_id) REFERENCES message_logs(id)
+    FOREIGN KEY (MESSAGE_ID) REFERENCES message_logs(IDNo)
     ON DELETE SET NULL,
   CONSTRAINT fk_settlement_agent
-    FOREIGN KEY (agent_id) REFERENCES agents(id)
+    FOREIGN KEY (AGENT_ID) REFERENCES agents(IDNo)
     ON DELETE SET NULL
 ) ENGINE=InnoDB;

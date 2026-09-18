@@ -22,8 +22,12 @@ export const config = {
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'agent_telegram_inbox',
   },
-  telegramBotToken: required('TELEGRAM_BOT_TOKEN'),
-  telegramPollMs: Number(process.env.TELEGRAM_POLL_MS || 2000),
+  // Only the *initial* seed for the `bot_config` DB table (see
+  // botConfigModel.ensureTable) — after first boot, the DB row is the real
+  // source of truth and this .env value is ignored. Optional now: it's
+  // fine for a fresh install to set the token via the Telegram API admin
+  // page instead of .env.
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   // When set (a public https base URL), the bot runs in webhook mode instead
   // of long-polling. e.g. https://inbox.example.com  ->  POST /api/telegram/webhook
   telegramWebhookUrl: (process.env.TELEGRAM_WEBHOOK_URL || '').replace(/\/+$/, ''),
@@ -47,6 +51,31 @@ export const pool = mysql.createPool({
 export async function query(sql, params) {
   const [rows] = await pool.execute(sql, params);
   return rows;
+}
+
+// Renames a column (e.g. migrating old_name -> NEW_NAME on a table that
+// already has data/live foreign keys) — idempotent: a no-op once newName
+// already exists, and a no-op on a fresh install where oldName never
+// existed (CREATE TABLE already used the new name). `typeDdl` is the full
+// column definition (type + NULL/DEFAULT/AUTO_INCREMENT/PRIMARY KEY/etc);
+// InnoDB updates any FK metadata pointing at a renamed column automatically.
+export async function renameColumn(table, oldName, newName, typeDdl) {
+  // `SHOW COLUMNS ... LIKE` matches case-insensitively, which is useless
+  // here since a rename is often *only* a case change (name -> NAME) —
+  // information_schema + BINARY gives an exact, case-sensitive check.
+  const already = await query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND BINARY COLUMN_NAME = :newName`,
+    { table, newName }
+  );
+  if (already.length > 0) return;
+  const old = await query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND BINARY COLUMN_NAME = :oldName`,
+    { table, oldName }
+  );
+  if (old.length === 0) return;
+  await query(`ALTER TABLE \`${table}\` CHANGE COLUMN \`${oldName}\` \`${newName}\` ${typeDdl}`);
 }
 
 // TRUNCATE the given tables on a single connection with FK checks disabled,
