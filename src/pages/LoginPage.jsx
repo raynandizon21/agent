@@ -85,10 +85,10 @@ export default function LoginPage() {
         <button
           type="button"
           disabled={busy}
-          onClick={() => doLogin('agent', '123')}
+          onClick={() => doLogin('admin', '123')}
           className="w-full py-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-medium transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
         >
-          Quick log in (agent)
+          Quick log in
         </button>
       </form>
     </div>
