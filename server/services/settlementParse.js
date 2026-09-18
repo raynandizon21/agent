@@ -191,10 +191,56 @@ function demoCageStep(text) {
 
 function parseAccountLine(line) {
   if (!line) return { account_no: null, player_name: null };
-  const [code, ...rest] = line.split(/\s*-\s*/);
+  // Accepts an ASCII hyphen or an en dash ("–") as the separator — Demo
+  // Cage's account-transaction messages use the latter.
+  const [code, ...rest] = line.split(/\s*[-–]\s*/);
   return {
     account_no: code?.trim() || null,
     player_name: rest.join(' - ').trim() || null,
+  };
+}
+
+/**
+ * Demo Cage also sends standalone account-ledger messages ("* 어카운트 입금 *"
+ * deposit / "* 어카운트 출금 *" withdrawal) outside of the Game Start -> ...
+ * -> Game End step sequence above — no Game #, one message per transaction.
+ * Unlike the step sequence, each of these is already a complete, final
+ * event, so it's returned without a `step` key: the caller (ingest.js)
+ * inserts a new settlements row per message instead of merging into an
+ * open game.
+ */
+function parseDemoCageTransaction(text) {
+  const isDeposit = /어카운트\s*입금/.test(text);
+  const isWithdrawal = /어카운트\s*출금/.test(text);
+  if (!isDeposit && !isWithdrawal) return null;
+
+  const { account_no, player_name } = parseAccountLine(
+    firstMatch(text, [/계정\s*[:：]\s*([^\n]+)/i])
+  );
+  if (!account_no) return null;
+
+  const amount = parseAmount(firstMatch(text, [/금액\s*[:：]\s*([+\-0-9,\s]+)/i]));
+  const balance = parseAmount(firstMatch(text, [/잔고\s*[:：]\s*([+\-0-9,\s]+)/i]));
+  const date = firstMatch(text, [/날짜\s*[:：]\s*([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})/i]);
+  const time = firstMatch(text, [
+    /시간\s*[:：]\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\s*(?:AM|PM)?)/i,
+  ]);
+  const when = date ? new Date(`${date} ${time || ''}`.trim()) : null;
+  const settled_at = when && !Number.isNaN(when.getTime()) ? when : null;
+
+  return {
+    junket: 'democage',
+    account_no,
+    account_name: null,
+    player_name,
+    game_no: null,
+    buy_in: isDeposit ? amount : null,
+    cashout: isWithdrawal ? amount : null,
+    win_loss: null,
+    rolling: null,
+    commission: null,
+    balance,
+    settled_at,
   };
 }
 
@@ -525,6 +571,9 @@ export function parseSettlement(text) {
   if (infinity) return infinity;
   // Ours but the step header wasn't recognised — don't let Win9 mangle it.
   if (/Infinity\s*Cage/i.test(text)) return null;
+
+  const democageTxn = parseDemoCageTransaction(text);
+  if (democageTxn) return democageTxn;
 
   const democage = parseDemoCage(text);
   if (democage) return democage;

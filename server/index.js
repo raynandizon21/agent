@@ -5,6 +5,7 @@ import { ensureAdminUser } from './controllers/authController.js';
 import { config, pool } from './db.js';
 import * as agentModel from './models/agentModel.js';
 import * as botConfigModel from './models/botConfigModel.js';
+import * as guestModel from './models/guestModel.js';
 import * as messageModel from './models/messageModel.js';
 import * as settlementModel from './models/settlementModel.js';
 import * as userModel from './models/userModel.js';
@@ -51,6 +52,7 @@ async function bindServer(port, host, { attempts = 8, delayMs = 300 } = {}) {
 async function main() {
   await pool.query('SELECT 1');
   await agentModel.ensureTable();
+  await guestModel.ensureTable();
   await botConfigModel.ensureTable({ botToken: config.telegramBotToken });
   await userModel.ensureTable();
   await messageModel.ensureTable();

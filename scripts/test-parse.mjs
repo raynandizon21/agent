@@ -119,6 +119,28 @@ Total Rolling: 50,000
 Date: 5/13/2026
 Time: 9:35:10 PM`;
 
+const demoCageDeposit = `Demo Cage
+
+* 어카운트 입금 *
+
+계정: KIM BYEONGMUN – PLAYER DEP
+금액: 2,520
+잔고: 2,520
+
+날짜: 9/18/2026
+시간: 10:22:17 AM`;
+
+const demoCageWithdrawal = `Demo Cage
+
+* 어카운트 출금 *
+
+계정: AA – DEP TOTAL
+금액: 56,333
+잔고: 0
+
+날짜: 9/18/2026
+시간: 10:14:23 AM`;
+
 for (const [name, text] of [
   ['win9a', win9a],
   ['win9b', win9b],
@@ -128,6 +150,8 @@ for (const [name, text] of [
   ['demoCageAddBuyin', demoCageAddBuyin],
   ['demoCageCashout', demoCageCashout],
   ['demoCageEnd', demoCageEnd],
+  ['demoCageDeposit', demoCageDeposit],
+  ['demoCageWithdrawal', demoCageWithdrawal],
 ]) {
   console.log('\n===', name, '===');
   console.log(JSON.stringify(parseSettlement(text), null, 2));

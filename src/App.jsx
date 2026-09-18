@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import AgentsPage from './pages/AgentsPage';
+import GuestsPage from './pages/GuestsPage';
 import InboxPage from './pages/InboxPage';
 import LoginPage from './pages/LoginPage';
 import SettlementsPage from './pages/SettlementsPage';
@@ -32,6 +33,7 @@ function Shell() {
           </NavLink>
           <NavLink to="/messages">Messages</NavLink>
           {isAdmin ? <NavLink to="/agents">Agents</NavLink> : null}
+          {isAdmin ? <NavLink to="/guests">Guests</NavLink> : null}
           {isAdmin ? <NavLink to="/users">Users</NavLink> : null}
           {isAdmin ? <NavLink to="/telegram">Telegram</NavLink> : null}
         </nav>
@@ -77,6 +79,14 @@ export default function App() {
             element={
               <AdminOnly>
                 <AgentsPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/guests"
+            element={
+              <AdminOnly>
+                <GuestsPage />
               </AdminOnly>
             }
           />
