@@ -18,6 +18,16 @@ function formatRate(value) {
   return `${n.toFixed(2)}%`;
 }
 
+// A junket badge's rate/percent suffix — shown on the guest table row and in
+// the Game Records header. Distinguishes the two mutually exclusive
+// commission modes (see JunketPicker's commissionMode()) since a 1% rate and
+// a 99% commission-percent look wildly different in magnitude otherwise.
+function junketBadgeSuffix(j) {
+  if (j.commission_rate != null) return `· ${j.commission_rate}% rate`;
+  if (j.commission_percent != null) return `· ${j.commission_percent}% comm`;
+  return null;
+}
+
 const PAGE_SIZE = 20;
 
 const JUNKETS = [
@@ -29,12 +39,31 @@ const JUNKETS = [
 
 const EMPTY_FORM = { telegram_id: '', guest_code: '', guest_name: '', junkets: [] };
 
+// True when saving this junket list will trigger a commission recomputation
+// on existing settlement rows (rate mode needs ROLLING there; percent mode
+// needs the account's past games at all — recomputeCommissionPercent()
+// re-derives the base from each row's own raw message).
+function willRecompute(junkets) {
+  return junkets.some((j) => j.account_no && (j.commission_rate != null || j.commission_percent != null));
+}
+
+// A linked account's commission can be driven one of two mutually exclusive
+// ways — see the same distinction server-side in guestController.js's
+// cleanJunkets(): a rate applied to ROLLING, or a percent applied to the
+// junket's own original commission. `entry.commission_percent != null` is
+// what marks an account as being in "percent" mode; otherwise it's "rate".
+function commissionMode(entry) {
+  return entry?.commission_percent != null ? 'percent' : 'rate';
+}
+
 // Junket checkboxes; checking one reveals a dropdown of that junket's real
 // account numbers (pulled from already-parsed Settlements) to link to this
-// guest. `value` is [{ junket, account_no }, ...]. `usedAccounts` is
-// { [junket]: Set(account_no) } already claimed by OTHER guests — a real
-// account belongs to one player, so those are hidden here to stop the same
-// account getting linked twice (this guest's own current pick stays visible).
+// guest, plus a Rate/Comm % mode toggle and its value. `value` is
+// [{ junket, account_no, commission_rate, commission_percent }, ...].
+// `usedAccounts` is { [junket]: Set(account_no) } already claimed by OTHER
+// guests — a real account belongs to one player, so those are hidden here to
+// stop the same account getting linked twice (this guest's own current pick
+// stays visible).
 function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) {
   return (
     <div className="space-y-1.5">
@@ -44,6 +73,7 @@ function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) 
         const options = (accountsByJunket[j.value] || []).filter(
           (a) => a.account_no === entry?.account_no || !used?.has(a.account_no)
         );
+        const mode = commissionMode(entry);
         return (
           <div key={j.value} className="flex items-center gap-2">
             <label className="flex items-center gap-1.5 cursor-pointer text-sm text-slate-200 w-24 shrink-0">
@@ -54,7 +84,10 @@ function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) 
                   onChange(
                     entry
                       ? value.filter((v) => v.junket !== j.value)
-                      : [...value, { junket: j.value, account_no: null, commission_rate: null }]
+                      : [
+                          ...value,
+                          { junket: j.value, account_no: null, commission_rate: null, commission_percent: null },
+                        ]
                   )
                 }
                 className="rounded bg-slate-950 border-slate-700 text-blue-600 w-3.5 h-3.5 cursor-pointer"
@@ -82,26 +115,73 @@ function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) 
                     </option>
                   ))}
                 </select>
-                <div className="relative w-24 shrink-0">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    value={entry.commission_rate ?? ''}
-                    onChange={(e) =>
-                      onChange(
-                        value.map((v) =>
-                          v.junket === j.value
-                            ? { ...v, commission_rate: e.target.value === '' ? null : e.target.value }
-                            : v
-                        )
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange(
+                      value.map((v) =>
+                        v.junket === j.value
+                          ? mode === 'rate'
+                            ? { ...v, commission_rate: null, commission_percent: 100 }
+                            : { ...v, commission_percent: null }
+                          : v
                       )
-                    }
-                    placeholder="Rate"
-                    title="Commission rate (%) — saving recomputes this account's commission on every game"
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 pr-5 text-sm text-slate-200 font-mono-num focus:outline-hidden"
-                  />
+                    )
+                  }
+                  title="Switch between a rate on rolling, or a percent of the junket's original commission"
+                  className="shrink-0 px-1.5 py-1 text-[11px] font-bold uppercase tracking-wide rounded border border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition cursor-pointer"
+                >
+                  {mode === 'rate' ? 'Rate' : 'Comm %'}
+                </button>
+                <div className="relative w-24 shrink-0">
+                  {mode === 'rate' ? (
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={entry.commission_rate ?? ''}
+                      onChange={(e) =>
+                        onChange(
+                          value.map((v) =>
+                            v.junket === j.value
+                              ? {
+                                  ...v,
+                                  commission_rate: e.target.value === '' ? null : e.target.value,
+                                  commission_percent: null,
+                                }
+                              : v
+                          )
+                        )
+                      }
+                      placeholder="Rate"
+                      title="Commission rate (%) of ROLLING — saving recomputes this account's commission on every game"
+                      className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 pr-5 text-sm text-slate-200 font-mono-num focus:outline-hidden"
+                    />
+                  ) : (
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="100"
+                      value={entry.commission_percent ?? 100}
+                      onChange={(e) =>
+                        onChange(
+                          value.map((v) =>
+                            v.junket === j.value
+                              ? {
+                                  ...v,
+                                  commission_percent: e.target.value === '' ? null : e.target.value,
+                                  commission_rate: null,
+                                }
+                              : v
+                          )
+                        )
+                      }
+                      title="Percent of the junket's own original commission credited — 100% = unchanged, saving recomputes this account's commission on every game"
+                      className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 pr-5 text-sm text-slate-200 font-mono-num focus:outline-hidden"
+                    />
+                  )}
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 text-[13px] pointer-events-none">
                     %
                   </span>
@@ -209,7 +289,7 @@ export default function GuestsPage() {
     setBusy(true);
     setError('');
     setOk('');
-    const recomputed = form.junkets.some((j) => j.account_no && j.commission_rate != null);
+    const recomputed = willRecompute(form.junkets);
     try {
       if (editingGuest) {
         await api(`/guests/${editingGuest.id}`, {
@@ -344,29 +424,28 @@ export default function GuestsPage() {
       ),
     [visibleRecords]
   );
+  // `hasOriginal` tracks whether ANY row actually had a parseable original
+  // commission — some junket messages (e.g. a garbled OCR read) never yield
+  // one, and defaulting a missing value to 0 for the sum would otherwise
+  // make the grand total misleadingly show "0"/"0.00%" (a real number)
+  // instead of "no data available", unlike the per-row "—".
   const originalTotals = useMemo(
     () =>
       visibleRecords.reduce(
         (acc, r) => ({
           rolling: acc.rolling + (Number(r.rolling) || 0),
           commission: acc.commission + (Number(r.original_commission) || 0),
+          hasOriginal: acc.hasOriginal || r.original_commission != null,
         }),
-        { rolling: 0, commission: 0 }
+        { rolling: 0, commission: 0, hasOriginal: false }
       ),
     [visibleRecords]
   );
   // Junket commission is rolling-based (a % of turnover), not buy-in-based.
-  const overallGameRate = originalTotals.rolling ? (originalTotals.commission / originalTotals.rolling) * 100 : null;
-  // The Game Records table shows each linked account's own custom commission
-  // rate (the same rate shown in its badge above), not the rolling-derived
-  // original rate — that one only shows in the Original Data popup.
-  const customRateByAccount = useMemo(() => {
-    const map = new Map();
-    for (const j of viewingGuest?.junkets || []) {
-      if (j.account_no) map.set(`${j.junket}:${j.account_no}`, j.commission_rate);
-    }
-    return map;
-  }, [viewingGuest]);
+  const overallGameRate =
+    originalTotals.hasOriginal && originalTotals.rolling
+      ? (originalTotals.commission / originalTotals.rolling) * 100
+      : null;
 
   return (
     <div className="space-y-3">
@@ -493,7 +572,7 @@ export default function GuestsPage() {
                                 >
                                   <span className="font-bold uppercase tracking-wider">{j.junket}</span>
                                   {j.account_no ? <span>· {j.account_no}</span> : null}
-                                  {j.commission_rate != null ? <span>· {j.commission_rate}%</span> : null}
+                                  {junketBadgeSuffix(j) ? <span>{junketBadgeSuffix(j)}</span> : null}
                                 </span>
                               );
                             })}
@@ -698,7 +777,7 @@ export default function GuestsPage() {
                       >
                         <span className="font-bold uppercase tracking-wider">{j.junket}</span>
                         {j.account_no ? <span>· {j.account_no}</span> : null}
-                        {j.commission_rate != null ? <span>· {j.commission_rate}%</span> : null}
+                        {junketBadgeSuffix(j) ? <span>{junketBadgeSuffix(j)}</span> : null}
                       </span>
                     );
                   })}
@@ -753,7 +832,7 @@ export default function GuestsPage() {
                   </p>
                 </div>
               ) : (
-                <div className="rounded-lg border border-slate-800 overflow-auto max-h-80">
+                <div className="rounded-lg border border-slate-800 overflow-auto max-h-[28rem]">
                   <table className="w-full text-left text-[13px] border-collapse">
                     <thead className="sticky top-0">
                       <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 text-[11px] font-bold">
@@ -767,7 +846,6 @@ export default function GuestsPage() {
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">BUY-IN</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">CASHOUT</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">ROLLING</th>
-                        <th className="py-2 px-2.5 text-right whitespace-nowrap">GAME RATE</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">COMMISSION</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">WIN/LOSS</th>
                         <th className="py-2 px-2.5 text-right whitespace-nowrap">BALANCE</th>
@@ -828,9 +906,6 @@ export default function GuestsPage() {
                           <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100">
                             {formatAmount(r.rolling)}
                           </td>
-                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-300 font-mono-num">
-                            {formatRate(customRateByAccount.get(`${r.junket}:${r.account_no}`))}
-                          </td>
                           <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-amber-400">
                             {formatAmount(r.commission)}
                           </td>
@@ -861,7 +936,6 @@ export default function GuestsPage() {
                         <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
                           {formatAmount(recordsTotals.rolling)}
                         </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap"></td>
                         <td className="py-2 px-2.5 text-right whitespace-nowrap text-amber-400">
                           {formatAmount(recordsTotals.commission)}
                         </td>
@@ -903,35 +977,30 @@ export default function GuestsPage() {
         maxWidth="max-w-7xl"
       >
         <div className="space-y-3 text-sm">
-          <p className="text-[13px] text-slate-400">
-            Commission below is re-derived from each settlement's raw message, ignoring any custom commission
-            rate saved on this guest's linked account. Game rate = original commission ÷ rolling.
-          </p>
-
           {visibleRecords.length === 0 ? (
             <div className="p-6 text-center rounded-lg bg-slate-950 border border-slate-800 space-y-1">
               <Calculator className="w-5 h-5 text-slate-600 mx-auto" />
               <p className="text-slate-500 text-sm">No game records to compute.</p>
             </div>
           ) : (
-            <div className="rounded-lg border border-slate-800 overflow-auto max-h-96">
+            <div className="rounded-lg border border-slate-800 overflow-auto max-h-[28rem]">
               <table className="w-full text-left text-[13px] border-collapse">
                 <thead className="sticky top-0">
                   <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 text-[11px] font-bold">
-                    <th className="py-2 px-2.5 whitespace-nowrap">DATE</th>
-                    <th className="py-2 px-2.5 whitespace-nowrap">STATUS</th>
-                    <th className="py-2 px-2.5 whitespace-nowrap">JUNKET</th>
-                    <th className="py-2 px-2.5 whitespace-nowrap">GAME NO.</th>
-                    <th className="py-2 px-2.5 whitespace-nowrap">ACCOUNT NO.</th>
-                    <th className="py-2 px-2.5">PLAYER NAME</th>
-                    <th className="py-2 px-2.5 whitespace-nowrap">AGENT</th>
-                    <th className="py-2 px-2.5 text-right whitespace-nowrap">BUY-IN</th>
-                    <th className="py-2 px-2.5 text-right whitespace-nowrap">CASHOUT</th>
-                    <th className="py-2 px-2.5 text-right whitespace-nowrap">ROLLING</th>
-                    <th className="py-2 px-2.5 text-right whitespace-nowrap">GAME RATE</th>
-                    <th className="py-2 px-2.5 text-right whitespace-nowrap">ORIGINAL COMMISSION</th>
-                    <th className="py-2 px-2.5 text-right whitespace-nowrap">WIN/LOSS</th>
-                    <th className="py-2 px-2.5 text-right whitespace-nowrap">BALANCE</th>
+                    <th className="py-2 px-1.5 whitespace-nowrap">DATE</th>
+                    <th className="py-2 px-1.5 whitespace-nowrap">STATUS</th>
+                    <th className="py-2 px-1.5 whitespace-nowrap">JUNKET</th>
+                    <th className="py-2 px-1.5 whitespace-nowrap">GAME NO.</th>
+                    <th className="py-2 px-1.5 whitespace-nowrap">ACCOUNT NO.</th>
+                    <th className="py-2 px-1.5">PLAYER NAME</th>
+                    <th className="py-2 px-1.5 whitespace-nowrap">AGENT</th>
+                    <th className="py-2 px-1.5 text-right whitespace-nowrap">BUY-IN</th>
+                    <th className="py-2 px-1.5 text-right whitespace-nowrap">CASHOUT</th>
+                    <th className="py-2 px-1.5 text-right whitespace-nowrap">ROLLING</th>
+                    <th className="py-2 px-1.5 text-right whitespace-nowrap">GAME RATE</th>
+                    <th className="py-2 px-1.5 text-right whitespace-nowrap">ORIGINAL COMMISSION</th>
+                    <th className="py-2 px-1.5 text-right whitespace-nowrap">WIN/LOSS</th>
+                    <th className="py-2 px-1.5 text-right whitespace-nowrap">BALANCE</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 bg-slate-900">
@@ -939,10 +1008,10 @@ export default function GuestsPage() {
                     const meta = JUNKETS.find((jj) => jj.value === r.junket);
                     return (
                       <tr key={r.id} className="hover:bg-slate-800/40 transition">
-                        <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-400">
+                        <td className="py-2 px-1.5 whitespace-nowrap font-mono-num text-slate-400">
                           {r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}
                         </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">
+                        <td className="py-2 px-1.5 whitespace-nowrap">
                           <span
                             className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded border ${
                               r.status === 'open'
@@ -953,7 +1022,7 @@ export default function GuestsPage() {
                             {r.status === 'open' ? r.step || 'open' : 'settled'}
                           </span>
                         </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">
+                        <td className="py-2 px-1.5 whitespace-nowrap">
                           <span
                             className={`inline-block uppercase font-bold text-[11px] px-1.5 py-0.5 rounded border ${
                               meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
@@ -962,41 +1031,41 @@ export default function GuestsPage() {
                             {r.junket}
                           </span>
                         </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-300">
+                        <td className="py-2 px-1.5 whitespace-nowrap font-mono-num text-slate-300">
                           {r.game_no || '—'}
                         </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-300">
+                        <td className="py-2 px-1.5 whitespace-nowrap font-mono-num text-slate-300">
                           {r.account_no || '—'}
                         </td>
-                        <td className="py-2 px-2.5 text-slate-200 truncate max-w-[180px]" title={r.player_name || ''}>
+                        <td className="py-2 px-1.5 text-slate-200 truncate max-w-[180px]" title={r.player_name || ''}>
                           {r.player_name || '—'}
                         </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap text-slate-200">
+                        <td className="py-2 px-1.5 whitespace-nowrap text-slate-200">
                           {r.agent_name || '—'}
                         </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
+                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-slate-200">
                           {formatAmount(r.buy_in)}
                         </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
+                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-slate-200">
                           {formatAmount(r.cashout)}
                         </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100">
+                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-slate-100">
                           {formatAmount(r.rolling)}
                         </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100 font-mono-num">
+                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-slate-100 font-mono-num">
                           {formatRate(r.game_rate)}
                         </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-amber-400">
+                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-amber-400">
                           {formatAmount(r.original_commission)}
                         </td>
                         <td
-                          className={`py-2 px-2.5 text-right whitespace-nowrap font-bold ${
+                          className={`py-2 px-1.5 text-right whitespace-nowrap font-bold ${
                             Number(r.win_loss) >= 0 ? 'text-emerald-400' : 'text-rose-400'
                           }`}
                         >
                           {formatAmount(r.win_loss)}
                         </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200 font-mono-num">
+                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-slate-200 font-mono-num">
                           {formatAmount(r.balance)}
                         </td>
                       </tr>
@@ -1005,32 +1074,32 @@ export default function GuestsPage() {
                 </tbody>
                 <tfoot className="sticky bottom-0">
                   <tr className="border-t border-slate-700 bg-slate-950 font-bold">
-                    <td className="py-2 px-2.5 whitespace-nowrap text-slate-400" colSpan={7}>
+                    <td className="py-2 px-1.5 whitespace-nowrap text-slate-400" colSpan={7}>
                       GRAND TOTAL
                     </td>
-                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
+                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-slate-100">
                       {formatAmount(recordsTotals.buy_in)}
                     </td>
-                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
+                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-slate-100">
                       {formatAmount(recordsTotals.cashout)}
                     </td>
-                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
+                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-slate-100">
                       {formatAmount(recordsTotals.rolling)}
                     </td>
-                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100 font-mono-num">
+                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-slate-100 font-mono-num">
                       {formatRate(overallGameRate)}
                     </td>
-                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-amber-400">
-                      {formatAmount(originalTotals.commission)}
+                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-amber-400">
+                      {originalTotals.hasOriginal ? formatAmount(originalTotals.commission) : '—'}
                     </td>
                     <td
-                      className={`py-2 px-2.5 text-right whitespace-nowrap ${
+                      className={`py-2 px-1.5 text-right whitespace-nowrap ${
                         recordsTotals.win_loss >= 0 ? 'text-emerald-400' : 'text-rose-400'
                       }`}
                     >
                       {formatAmount(recordsTotals.win_loss)}
                     </td>
-                    <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100 font-mono-num">
+                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-slate-100 font-mono-num">
                       {formatAmount(recordsTotals.balance)}
                     </td>
                   </tr>

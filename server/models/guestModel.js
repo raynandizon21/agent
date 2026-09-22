@@ -82,6 +82,12 @@ export async function ensureTable() {
   // Migrate a table created before per-account commission rates existed.
   await ensureColumn('guest_junkets', 'COMMISSION_RATE', 'DECIMAL(6,3) NULL');
 
+  // Migrate a table created before the commission-percent mode existed. This
+  // is an alternative to COMMISSION_RATE (mutually exclusive per account) —
+  // instead of a rate applied to ROLLING, it's a percentage cut applied to
+  // the junket's own original commission. See recomputeCommissionPercent().
+  await ensureColumn('guest_junkets', 'COMMISSION_PERCENT', 'DECIMAL(6,3) NULL');
+
   // Migrate a table created before IDNo became the primary key (it started
   // as a composite PRIMARY KEY (GUEST_ID, JUNKET), matching this org's usual
   // IDNo convention now — see agents/guests above).
@@ -127,7 +133,7 @@ export async function listAll({ agentId = null } = {}) {
 
   const links = await query(`
     SELECT GUEST_ID AS guest_id, JUNKET AS junket, ACCOUNT_NO AS account_no,
-           COMMISSION_RATE AS commission_rate
+           COMMISSION_RATE AS commission_rate, COMMISSION_PERCENT AS commission_percent
     FROM guest_junkets
   `);
   const byGuest = new Map();
@@ -137,6 +143,7 @@ export async function listAll({ agentId = null } = {}) {
       junket: l.junket,
       account_no: l.account_no,
       commission_rate: l.commission_rate == null ? null : Number(l.commission_rate),
+      commission_percent: l.commission_percent == null ? null : Number(l.commission_percent),
     });
   }
 
@@ -166,14 +173,20 @@ export async function findJunketConflicts(junkets, excludeGuestId = null) {
   return conflicts;
 }
 
-// `junkets` is [{ junket, account_no, commission_rate }, ...].
+// `junkets` is [{ junket, account_no, commission_rate, commission_percent }, ...].
 async function setJunkets(guestId, junkets) {
   await query('DELETE FROM guest_junkets WHERE GUEST_ID = :guestId', { guestId });
-  for (const { junket, account_no, commission_rate } of junkets || []) {
+  for (const { junket, account_no, commission_rate, commission_percent } of junkets || []) {
     await query(
-      `INSERT INTO guest_junkets (GUEST_ID, JUNKET, ACCOUNT_NO, COMMISSION_RATE)
-       VALUES (:guestId, :junket, :accountNo, :commissionRate)`,
-      { guestId, junket, accountNo: account_no || null, commissionRate: commission_rate ?? null }
+      `INSERT INTO guest_junkets (GUEST_ID, JUNKET, ACCOUNT_NO, COMMISSION_RATE, COMMISSION_PERCENT)
+       VALUES (:guestId, :junket, :accountNo, :commissionRate, :commissionPercent)`,
+      {
+        guestId,
+        junket,
+        accountNo: account_no || null,
+        commissionRate: commission_rate ?? null,
+        commissionPercent: commission_percent ?? null,
+      }
     );
   }
 }
@@ -236,7 +249,8 @@ export async function getAgentId(id) {
 // view (which junkets/accounts, then their settlement history for those).
 export async function getJunketLinks(guestId) {
   return query(
-    `SELECT JUNKET AS junket, ACCOUNT_NO AS account_no, COMMISSION_RATE AS commission_rate
+    `SELECT JUNKET AS junket, ACCOUNT_NO AS account_no, COMMISSION_RATE AS commission_rate,
+            COMMISSION_PERCENT AS commission_percent
        FROM guest_junkets WHERE GUEST_ID = :guestId`,
     { guestId }
   );

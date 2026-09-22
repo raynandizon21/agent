@@ -1,4 +1,5 @@
 import { query, renameColumn, truncateTables } from '../db.js';
+import { parseSettlement } from '../services/settlementParse.js';
 
 // Add a column to an existing table if missing. Safe to call every boot.
 async function ensureColumn(table, column, ddl) {
@@ -251,6 +252,37 @@ export async function recomputeCommission({ junket, account_no, rate }) {
     { junket, account_no, rate }
   );
   return result.affectedRows || 0;
+}
+
+// Recomputes COMMISSION = ROUND(original_commission * percent / 100) on
+// every existing settlement row for one (junket, account_no) — the
+// commission-percent alternative to recomputeCommission() above. Instead of
+// a rate applied to ROLLING, this is a percentage cut of the junket's own
+// original commission (re-derived by re-parsing RAW_TEXT, same as the
+// Guests page's "Original data" view — COMMISSION itself may already have
+// been overwritten by a previous custom rate/percent, so it can't be trusted
+// as the base). Rows whose original commission can't be determined are left
+// untouched. Done per-row in JS (unlike recomputeCommission's single SQL
+// UPDATE) since the multiplier lives in the raw message, not a column.
+export async function recomputeCommissionPercent({ junket, account_no, percent }) {
+  const rows = await query(
+    `SELECT IDNo AS id, RAW_TEXT AS raw_text FROM settlements
+      WHERE JUNKET = :junket AND ACCOUNT_NO = :account_no`,
+    { junket, account_no }
+  );
+  let touched = 0;
+  for (const row of rows) {
+    const original = parseSettlement(row.raw_text);
+    const originalFields = original ? original.fields ?? original : null;
+    const originalCommission = originalFields?.commission ?? null;
+    if (originalCommission == null) continue;
+    await query('UPDATE settlements SET COMMISSION = :commission WHERE IDNo = :id', {
+      commission: Math.round((originalCommission * percent) / 100),
+      id: row.id,
+    });
+    touched++;
+  }
+  return touched;
 }
 
 export async function deleteAll() {

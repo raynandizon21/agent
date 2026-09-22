@@ -82,14 +82,24 @@ export default function LoginPage() {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
 
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => doLogin('admin', '123')}
-          className="w-full py-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-medium transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
-        >
-          Quick log in
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => doLogin('admin', '123')}
+            className="w-full py-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-medium transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+          >
+            Quick log in (Admin)
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => doLogin('raynan', '12348765')}
+            className="w-full py-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-medium transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+          >
+            Quick log in (Agent)
+          </button>
+        </div>
       </form>
     </div>
   );

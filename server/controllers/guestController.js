@@ -5,10 +5,14 @@ import { parseSettlement } from '../services/settlementParse.js';
 
 const KNOWN_JUNKETS = ['win9', 'galaxy', 'democage', 'infinity'];
 
-// value is [{ junket, account_no, commission_rate }, ...] from the client.
-// commission_rate is a percentage (e.g. 1.43 for 1.43%), clamped to a sane
-// 0–100 range — bad input is dropped (left null) rather than rejecting the
-// whole save.
+// value is [{ junket, account_no, commission_rate, commission_percent }, ...]
+// from the client. commission_rate is a percentage of ROLLING (e.g. 1.43 for
+// 1.43%); commission_percent is a percentage of the junket's own original
+// commission (e.g. 99.5 to credit 99.5% of it). The two are mutually
+// exclusive per account — whichever one the client sent a value for wins,
+// and the other is forced to null so a stale value from a prior mode never
+// lingers. Both are clamped to a sane 0–100 range — bad input is dropped
+// (left null) rather than rejecting the whole save.
 function cleanJunkets(value) {
   if (!Array.isArray(value)) return [];
   const seen = new Set();
@@ -19,26 +23,43 @@ function cleanJunkets(value) {
     seen.add(junket);
     const accountNo =
       item.account_no == null || item.account_no === '' ? null : String(item.account_no).trim();
-    const rateNum = item.commission_rate == null || item.commission_rate === '' ? NaN : Number(item.commission_rate);
-    const commissionRate = Number.isFinite(rateNum) && rateNum >= 0 && rateNum <= 100 ? rateNum : null;
-    out.push({ junket, account_no: accountNo, commission_rate: commissionRate });
+
+    const percentNum =
+      item.commission_percent == null || item.commission_percent === '' ? NaN : Number(item.commission_percent);
+    const commissionPercent = Number.isFinite(percentNum) && percentNum >= 0 && percentNum <= 100 ? percentNum : null;
+
+    let commissionRate = null;
+    if (commissionPercent == null) {
+      const rateNum = item.commission_rate == null || item.commission_rate === '' ? NaN : Number(item.commission_rate);
+      commissionRate = Number.isFinite(rateNum) && rateNum >= 0 && rateNum <= 100 ? rateNum : null;
+    }
+
+    out.push({ junket, account_no: accountNo, commission_rate: commissionRate, commission_percent: commissionPercent });
   }
   return out;
 }
 
-// For every linked junket that has both an account and a commission rate,
-// recompute COMMISSION on all of that account's existing settlement rows —
-// "auto recomputation" when the guest form is saved. Emits one realtime
-// SETTLEMENT event afterward so any open Settlements tab refreshes.
+// For every linked junket that has both an account and a commission rate or
+// percent, recompute COMMISSION on all of that account's existing settlement
+// rows — "auto recomputation" when the guest form is saved. Emits one
+// realtime SETTLEMENT event afterward so any open Settlements tab refreshes.
 async function recomputeForJunkets(junkets) {
   let touched = 0;
   for (const j of junkets) {
-    if (!j.account_no || j.commission_rate == null) continue;
-    touched += await settlementModel.recomputeCommission({
-      junket: j.junket,
-      account_no: j.account_no,
-      rate: j.commission_rate,
-    });
+    if (!j.account_no) continue;
+    if (j.commission_percent != null) {
+      touched += await settlementModel.recomputeCommissionPercent({
+        junket: j.junket,
+        account_no: j.account_no,
+        percent: j.commission_percent,
+      });
+    } else if (j.commission_rate != null) {
+      touched += await settlementModel.recomputeCommission({
+        junket: j.junket,
+        account_no: j.account_no,
+        rate: j.commission_rate,
+      });
+    }
   }
   if (touched > 0) bus.emit(Events.SETTLEMENT, { recomputed: true });
 }
