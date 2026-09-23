@@ -52,24 +52,16 @@ const JUNKETS = [
 
 const EMPTY_FORM = { telegram_id: '', guest_code: '', guest_name: '', junkets: [] };
 
-// True when saving this junket list will trigger a REAL commission
-// recomputation on existing settlement rows — only commission_rate does
-// that (guestController.js's recomputeForJunkets() only ever calls
-// settlementModel.recomputeCommission() when it's set). commission_percent
-// never touches the database — it's a Guests-page display-only ROLLING
-// discount (see effectiveRow() below), so it's excluded here.
-function willRecompute(junkets) {
-  return junkets.some((j) => j.account_no && j.commission_rate != null);
-}
-
 // Junket checkboxes; checking one reveals a dropdown of that junket's real
 // account numbers (pulled from already-parsed Settlements) to link to this
 // guest, plus two independent, optional fields — Rolling % and Com % — that
-// can both be set at once (a hybrid: Rolling % discounts ROLLING for the
-// Guests page display, Com % is the rate applied against that discounted
-// ROLLING instead of the original game rate; Com % alone still recomputes
-// the real stored commission the normal way — see effectiveRow()/
-// customRate() and CLAUDE.md's "custom commission modes" section). `value`
+// can both be set at once (a hybrid). Both are Guests-page **display-only**
+// — neither ever writes to the real settlements data (Settlements page,
+// "Original data", exports all stay exactly what the junket reported): Com %
+// alone shows ROLLING × Com% as COMMISSION; Rolling % discounts ROLLING for
+// display, with Com % (if also set) or the original game rate as the rate
+// against that discounted ROLLING — see effectiveRow()/customRate() and
+// CLAUDE.md's "custom commission modes" section. `value`
 // is [{ junket, account_no, commission_rate, commission_percent }, ...].
 // `usedAccounts` is { [junket]: Set(account_no) } already claimed by OTHER
 // guests — a real account belongs to one player, so those are hidden here to
@@ -167,7 +159,7 @@ function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) 
                           )
                         )
                       }
-                      title="Commission rate (%) of ROLLING — saving recomputes this account's real stored commission on every game. If a Rolling % is also set, this rate applies against the discounted ROLLING instead of the original game rate for the Guests page display."
+                      title="Commission rate (%) of ROLLING, shown on the Guests page only — never overwrites the real stored commission. If a Rolling % is also set, this rate applies against the discounted ROLLING instead of the original game rate."
                       className="w-full bg-slate-950 border border-slate-800 rounded px-1.5 py-1 pr-4 text-sm text-slate-200 font-mono-num focus:outline-hidden"
                     />
                     <span className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-500 text-[11px] pointer-events-none">
@@ -318,7 +310,6 @@ export default function GuestsPage() {
     setBusy(true);
     setError('');
     setOk('');
-    const recomputed = willRecompute(form.junkets);
     try {
       if (editingGuest) {
         await api(`/guests/${editingGuest.id}`, {
@@ -331,7 +322,7 @@ export default function GuestsPage() {
             junkets: form.junkets,
           }),
         });
-        setOk(recomputed ? 'Guest updated — commission recomputed for that account.' : 'Guest updated');
+        setOk('Guest updated');
       } else {
         await api('/guests', {
           method: 'POST',
@@ -342,7 +333,7 @@ export default function GuestsPage() {
             junkets: form.junkets,
           }),
         });
-        setOk(recomputed ? 'Guest added — commission recomputed for that account.' : 'Guest added');
+        setOk('Guest added');
       }
       setIsModalOpen(false);
       await load();
@@ -468,12 +459,21 @@ export default function GuestsPage() {
       const commission = rolling != null && rate != null ? Math.round((rolling * rate) / 100) : null;
       return { rolling, commission };
     }
+    if (entry?.commission_rate != null) {
+      // Com % alone: real ROLLING shown unchanged, COMMISSION is a display-
+      // only ROLLING × rate — never written back to settlements.COMMISSION
+      // (r.commission is always the junket's real, untouched value).
+      const commission =
+        r.rolling != null ? Math.round((Number(r.rolling) * entry.commission_rate) / 100) : null;
+      return { rolling: r.rolling, commission };
+    }
     return { rolling: r.rolling, commission: r.commission };
   }
   // The RATE column: with a Rolling % set, this is whatever rate actually
   // produced the discounted COMMISSION above (custom Com % if also set,
   // else the original game rate). With only a Com % set (no Rolling %),
-  // it's that custom rate directly — the real stored commission's rate.
+  // it's that custom rate directly — the rate driving the displayed
+  // (display-only) commission above.
   function customRate(r) {
     const entry = junketByAccount[`${r.junket}|${r.account_no}`];
     if (entry?.commission_percent != null) return entry.commission_rate ?? r.game_rate;

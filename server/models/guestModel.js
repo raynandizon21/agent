@@ -82,10 +82,10 @@ export async function ensureTable() {
   // Migrate a table created before per-account commission rates existed.
   await ensureColumn('guest_junkets', 'COMMISSION_RATE', 'DECIMAL(6,3) NULL');
 
-  // Migrate a table created before the commission-percent mode existed. This
-  // is an alternative to COMMISSION_RATE (mutually exclusive per account) —
-  // instead of a rate applied to ROLLING, it's a percentage cut applied to
-  // the junket's own original commission. See recomputeCommissionPercent().
+  // Migrate a table created before the commission-percent mode existed. Both
+  // this and COMMISSION_RATE can be set at once (a hybrid) and are 100%
+  // Guests-page display-only — see GuestsPage.jsx's effectiveRow()/
+  // customRate() and CLAUDE.md's "custom commission modes" section.
   await ensureColumn('guest_junkets', 'COMMISSION_PERCENT', 'DECIMAL(6,3) NULL');
 
   // Migrate a table created before IDNo became the primary key (it started

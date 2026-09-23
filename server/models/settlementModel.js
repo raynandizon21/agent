@@ -262,23 +262,6 @@ export async function deleteGame({ junket, account_no, game_no }) {
   return result.affectedRows || 0;
 }
 
-// Recomputes COMMISSION = ROUND(ROLLING * rate / 100) on every existing
-// settlement row for one (junket, account_no) — used when a guest's linked
-// account gets a commission rate saved on the Guests page, so past and
-// current games for that account reflect the new rate immediately. Junket
-// commission is rolling-based (a % of turnover), not buy-in-based — verified
-// against Infinity Cage's own account panel, where the same commission/rolling
-// ratio matches its displayed RATE exactly. Rows with no ROLLING are left
-// untouched (nothing to compute from).
-export async function recomputeCommission({ junket, account_no, rate }) {
-  const result = await query(
-    `UPDATE settlements
-        SET COMMISSION = ROUND(ROLLING * :rate / 100)
-      WHERE JUNKET = :junket AND ACCOUNT_NO = :account_no AND ROLLING IS NOT NULL`,
-    { junket, account_no, rate }
-  );
-  return result.affectedRows || 0;
-}
 
 export async function deleteAll() {
   // "Clear data" wipes everything: settlements AND the message log they came
