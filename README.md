@@ -157,6 +157,30 @@ node scripts/test-parse.mjs
 
 Unlike Win9/Galaxy (`settlementModel.create()` — always a new row), Demo Cage uses `settlementModel.upsertStep()`: it looks up the latest `settlements` row for the same `(junket, account_no, game_no)` and merges the new step's fields into it, rather than inserting a new row per message. A step only updates the fields it actually reports; everything else is left as-is. A `Game Start` after the previous game on that account+number already settled starts a fresh row (a new game reusing the same number); anything else (including a late/duplicate `Game End`) corrects the existing row in place.
 
+## Guests page — custom commission modes
+
+A guest's linked junket account (`guest_junkets.commission_rate` / `commission_percent`) can override the junket's own commission via two independent, optional fields in the guest edit form — **Rolling %** and **Com %** (`JunketPicker` / inline badge editor in [GuestsPage.jsx](src/pages/GuestsPage.jsx)). Either can be set alone, or both together (hybrid):
+
+- **Com % alone** (`commission_rate`) — a straight rate on the real ROLLING. Saving it calls `settlementModel.recomputeCommission()`, which overwrites the **actual stored** `settlements.COMMISSION` for every one of that account's rows: `COMMISSION = ROLLING × rate / 100`. What you see on the Guests page for this case *is* the real database value.
+
+- **Rolling % alone** (`commission_percent`) — never touches the database. It's a **display-only** transform applied per row in `effectiveRow()`, so it doesn't affect the Settlements page or other guests sharing the same account:
+  ```
+  ROLLING (shown)    = real ROLLING × Rolling% / 100
+  COMMISSION (shown) = ROLLING (shown) × original game rate / 100
+  ```
+  RATE shows the *original* junket rate in this case, so `RATE × ROLLING(shown) / 100` reconciles to COMMISSION.
+
+- **Both set (hybrid)** — Rolling % still discounts ROLLING for display, but Com % becomes the rate multiplied against that *discounted* ROLLING instead of the original game rate:
+  ```
+  ROLLING (shown)    = real ROLLING × Rolling% / 100
+  COMMISSION (shown) = ROLLING (shown) × Com% / 100
+  ```
+  Com % **also still separately recomputes the real stored COMMISSION** using the un-discounted real ROLLING, the same as "Com % alone" above — that write path doesn't know Rolling % exists. So in hybrid mode the DB's real commission and what the Guests page displays are deliberately two different numbers; that's expected.
+
+The **"Original data"** modal always bypasses all of the above — every column there is the untouched value straight from the junket's own report.
+
+Verified (INF555, real ROLLING = 3,225,000, original game rate = 1.45%): **Com** @ 1.2% alone → COMMISSION = `3,225,000 × 1.2 / 100` = **38,700**; **Rolling** @ 50% alone → ROLLING `1,612,500`, COMMISSION = `1,612,500 × 1.45 / 100` = **23,381**; **hybrid** Rolling 50% + Com 1.2% → ROLLING `1,612,500`, COMMISSION (display) = `1,612,500 × 1.2 / 100` = **19,350** (real stored commission stays 38,700).
+
 ## Realtime updates
 
 No client-side polling loop. Flow:

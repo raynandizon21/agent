@@ -1,5 +1,14 @@
 import { query, renameColumn, truncateTables } from '../db.js';
-import { parseSettlement } from '../services/settlementParse.js';
+
+// RATE = junket's own commission-on-rolling %, computed once at write time
+// and stored — GAME RATE reads this column directly instead of re-parsing
+// RAW_TEXT on every request. Only meaningful once ROLLING/COMMISSION are the
+// junket's real, freshly-parsed values, so callers pass null for an
+// open/in-progress step (see upsertStep()) since those can still change.
+function computeRate(commission, rolling) {
+  if (commission == null || !rolling) return null;
+  return Math.round((commission / rolling) * 100 * 1000) / 1000;
+}
 
 // Add a column to an existing table if missing. Safe to call every boot.
 async function ensureColumn(table, column, ddl) {
@@ -27,13 +36,16 @@ export async function ensureTable() {
       ACCOUNT_NO VARCHAR(120) NULL,
       ACCOUNT_NAME VARCHAR(255) NULL,
       PLAYER_NAME VARCHAR(512) NULL,
+      GUEST VARCHAR(255) NULL,
       GAME_NO VARCHAR(64) NULL,
       BUY_IN BIGINT NULL,
       CASHOUT BIGINT NULL,
       WIN_LOSS BIGINT NULL,
       ROLLING BIGINT NULL,
       COMMISSION BIGINT NULL,
+      RATE DECIMAL(6,3) NULL,
       BALANCE BIGINT NULL,
+      GAME_START DATETIME NULL,
       SETTLED_AT DATETIME NULL,
       RAW_TEXT MEDIUMTEXT NULL,
       STATUS VARCHAR(16) NOT NULL DEFAULT 'settled',
@@ -73,7 +85,13 @@ export async function ensureTable() {
   );
 
   // Migrate pre-existing databases that were created before these columns existed.
+  await ensureColumn('settlements', 'RATE', 'DECIMAL(6,3) NULL AFTER COMMISSION');
   await ensureColumn('settlements', 'BALANCE', 'BIGINT NULL AFTER COMMISSION');
+  // GUEST/GAME_START — the bulk-report table's own GUEST and GAME START
+  // columns (see parseInfinityBulkReport() in settlementParse.js). Only that
+  // format's rows populate these; every other parser leaves them NULL.
+  await ensureColumn('settlements', 'GUEST', 'VARCHAR(255) NULL AFTER PLAYER_NAME');
+  await ensureColumn('settlements', 'GAME_START', 'DATETIME NULL AFTER BALANCE');
   await ensureColumn(
     'settlements',
     'STATUS',
@@ -89,11 +107,11 @@ export async function ensureTable() {
 export async function create(row) {
   const result = await query(
     `INSERT INTO settlements
-      (MESSAGE_ID, AGENT_ID, JUNKET, ACCOUNT_NO, ACCOUNT_NAME, PLAYER_NAME, GAME_NO,
-       BUY_IN, CASHOUT, WIN_LOSS, ROLLING, COMMISSION, BALANCE, SETTLED_AT, RAW_TEXT)
+      (MESSAGE_ID, AGENT_ID, JUNKET, ACCOUNT_NO, ACCOUNT_NAME, PLAYER_NAME, GUEST, GAME_NO,
+       BUY_IN, CASHOUT, WIN_LOSS, ROLLING, COMMISSION, RATE, BALANCE, GAME_START, SETTLED_AT, RAW_TEXT)
      VALUES
-      (:messageId, :agentId, :junket, :accountNo, :accountName, :playerName, :gameNo,
-       :buyIn, :cashout, :winLoss, :rolling, :commission, :balance, :settledAt, :rawText)`,
+      (:messageId, :agentId, :junket, :accountNo, :accountName, :playerName, :guest, :gameNo,
+       :buyIn, :cashout, :winLoss, :rolling, :commission, :rate, :balance, :gameStart, :settledAt, :rawText)`,
     {
       messageId: row.messageId ?? null,
       agentId: row.agentId ?? null,
@@ -101,13 +119,16 @@ export async function create(row) {
       accountNo: row.account_no ?? null,
       accountName: row.account_name ?? null,
       playerName: row.player_name ?? null,
+      guest: row.guest ?? null,
       gameNo: row.game_no ?? null,
       buyIn: row.buy_in ?? null,
       cashout: row.cashout ?? null,
       winLoss: row.win_loss ?? null,
       rolling: row.rolling ?? null,
       commission: row.commission ?? null,
+      rate: computeRate(row.commission, row.rolling),
       balance: row.balance ?? null,
+      gameStart: row.game_start ?? null,
       settledAt: row.settled_at ?? null,
       rawText: row.raw_text ?? null,
     }
@@ -157,6 +178,8 @@ export async function upsertStep(
 
   if (latest && !startsFresh) {
     const status = isFinal || latest.status === 'settled' ? 'settled' : 'open';
+    const rolling = fields.rolling ?? latest.rolling;
+    const commission = fields.commission ?? latest.commission;
     await query(
       `UPDATE settlements SET
         PLAYER_NAME = :playerName,
@@ -165,6 +188,7 @@ export async function upsertStep(
         WIN_LOSS = :winLoss,
         ROLLING = :rolling,
         COMMISSION = :commission,
+        RATE = :rate,
         BALANCE = :balance,
         SETTLED_AT = :settledAt,
         STATUS = :status,
@@ -178,8 +202,9 @@ export async function upsertStep(
         buyIn: fields.buy_in ?? latest.buy_in,
         cashout: fields.cashout ?? latest.cashout,
         winLoss: fields.win_loss ?? latest.win_loss,
-        rolling: fields.rolling ?? latest.rolling,
-        commission: fields.commission ?? latest.commission,
+        rolling,
+        commission,
+        rate: status === 'settled' ? computeRate(commission, rolling) : null,
         balance: fields.balance ?? latest.balance,
         settledAt: fields.settled_at ?? latest.settled_at,
         status,
@@ -198,11 +223,11 @@ export async function upsertStep(
   const result = await query(
     `INSERT INTO settlements
       (MESSAGE_ID, AGENT_ID, JUNKET, ACCOUNT_NO, ACCOUNT_NAME, PLAYER_NAME, GAME_NO,
-       BUY_IN, CASHOUT, WIN_LOSS, ROLLING, COMMISSION, BALANCE, SETTLED_AT, RAW_TEXT,
+       BUY_IN, CASHOUT, WIN_LOSS, ROLLING, COMMISSION, RATE, BALANCE, SETTLED_AT, RAW_TEXT,
        STATUS, STEP)
      VALUES
       (:messageId, :agentId, :junket, :accountNo, NULL, :playerName, :gameNo,
-       :buyIn, :cashout, :winLoss, :rolling, :commission, :balance, :settledAt, :rawText,
+       :buyIn, :cashout, :winLoss, :rolling, :commission, :rate, :balance, :settledAt, :rawText,
        :status, :step)`,
     {
       messageId: messageId ?? null,
@@ -216,6 +241,7 @@ export async function upsertStep(
       winLoss: fields.win_loss ?? null,
       rolling: fields.rolling ?? null,
       commission: fields.commission ?? null,
+      rate: status === 'settled' ? computeRate(fields.commission, fields.rolling) : null,
       balance: fields.balance ?? null,
       settledAt: fields.settled_at ?? null,
       rawText: raw_text ?? null,
@@ -252,37 +278,6 @@ export async function recomputeCommission({ junket, account_no, rate }) {
     { junket, account_no, rate }
   );
   return result.affectedRows || 0;
-}
-
-// Recomputes COMMISSION = ROUND(original_commission * percent / 100) on
-// every existing settlement row for one (junket, account_no) — the
-// commission-percent alternative to recomputeCommission() above. Instead of
-// a rate applied to ROLLING, this is a percentage cut of the junket's own
-// original commission (re-derived by re-parsing RAW_TEXT, same as the
-// Guests page's "Original data" view — COMMISSION itself may already have
-// been overwritten by a previous custom rate/percent, so it can't be trusted
-// as the base). Rows whose original commission can't be determined are left
-// untouched. Done per-row in JS (unlike recomputeCommission's single SQL
-// UPDATE) since the multiplier lives in the raw message, not a column.
-export async function recomputeCommissionPercent({ junket, account_no, percent }) {
-  const rows = await query(
-    `SELECT IDNo AS id, RAW_TEXT AS raw_text FROM settlements
-      WHERE JUNKET = :junket AND ACCOUNT_NO = :account_no`,
-    { junket, account_no }
-  );
-  let touched = 0;
-  for (const row of rows) {
-    const original = parseSettlement(row.raw_text);
-    const originalFields = original ? original.fields ?? original : null;
-    const originalCommission = originalFields?.commission ?? null;
-    if (originalCommission == null) continue;
-    await query('UPDATE settlements SET COMMISSION = :commission WHERE IDNo = :id', {
-      commission: Math.round((originalCommission * percent) / 100),
-      id: row.id,
-    });
-    touched++;
-  }
-  return touched;
 }
 
 export async function deleteAll() {
@@ -337,10 +332,10 @@ export async function listByAccounts(pairs, { agentId = null } = {}) {
     SELECT
       s.IDNo AS id, s.AGENT_ID AS agent_id, a.NAME AS agent_name,
       s.JUNKET AS junket, s.ACCOUNT_NO AS account_no, s.ACCOUNT_NAME AS account_name,
-      s.PLAYER_NAME AS player_name, s.GAME_NO AS game_no,
+      s.PLAYER_NAME AS player_name, s.GUEST AS guest, s.GAME_NO AS game_no,
       s.BUY_IN AS buy_in, s.CASHOUT AS cashout, s.WIN_LOSS AS win_loss,
-      s.ROLLING AS rolling, s.COMMISSION AS commission, s.BALANCE AS balance,
-      s.SETTLED_AT AS settled_at, s.STATUS AS status, s.STEP AS step,
+      s.ROLLING AS rolling, s.COMMISSION AS commission, s.RATE AS rate, s.BALANCE AS balance,
+      s.GAME_START AS game_start, s.SETTLED_AT AS settled_at, s.STATUS AS status, s.STEP AS step,
       s.CREATED_AT AS created_at, s.RAW_TEXT AS raw_text
     FROM settlements s
     LEFT JOIN agents a ON a.IDNo = s.AGENT_ID
@@ -368,13 +363,16 @@ export async function list({ limit = 100, q = '', junket = '', agentId = null } 
       s.ACCOUNT_NO AS account_no,
       s.ACCOUNT_NAME AS account_name,
       s.PLAYER_NAME AS player_name,
+      s.GUEST AS guest,
       s.GAME_NO AS game_no,
       s.BUY_IN AS buy_in,
       s.CASHOUT AS cashout,
       s.WIN_LOSS AS win_loss,
       s.ROLLING AS rolling,
       s.COMMISSION AS commission,
+      s.RATE AS rate,
       s.BALANCE AS balance,
+      s.GAME_START AS game_start,
       s.SETTLED_AT AS settled_at,
       s.STATUS AS status,
       s.STEP AS step,

@@ -418,6 +418,157 @@ function parseInfinityCage(text) {
   };
 }
 
+const CLAUDE_BULK_ROWS_MARKER = '__CLAUDE_BULK_ROWS__';
+
+/**
+ * telegram.js's ocrPhoto() tries Claude vision on the bulk report table
+ * (see visionExtract.js) before falling back to raw tesseract text, and
+ * marks a successful extraction with CLAUDE_BULK_ROWS_MARKER + a JSON array
+ * so this layer never re-runs the regex fallback on top of it. Kept
+ * independent of visionExtract.js's own copy of the marker string (parse
+ * and vision-call concerns don't need to share an import) — if you rename
+ * one, rename both.
+ */
+function parseClaudeBulkRows(text) {
+  const idx = text.indexOf(CLAUDE_BULK_ROWS_MARKER);
+  if (idx === -1) return null;
+
+  let raw;
+  try {
+    raw = JSON.parse(text.slice(idx + CLAUDE_BULK_ROWS_MARKER.length));
+  } catch {
+    return null; // malformed JSON — let the caller fall through
+  }
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+
+  const parseDate = (s) => {
+    if (!s) return null;
+    const when = new Date(`${String(s).replace(',', '')} ${new Date().getFullYear()}`);
+    return Number.isNaN(when.getTime()) ? null : when;
+  };
+  const num = (v) => (v == null || v === '' ? null : Number(v));
+
+  const rows = raw
+    .filter((r) => r?.account_no)
+    .map((r) => ({
+      junket: 'infinity',
+      account_no: String(r.account_no),
+      account_name: null,
+      player_name: r.player_name ? String(r.player_name).trim() : null,
+      guest: r.guest ? String(r.guest).trim() : null,
+      game_no: null,
+      buy_in: num(r.buy_in),
+      cashout: num(r.cashout),
+      rolling: num(r.rolling),
+      commission: num(r.commission),
+      win_loss: num(r.win_loss),
+      balance: null,
+      game_start: parseDate(r.game_start),
+      settled_at: parseDate(r.game_end) ?? parseDate(r.game_start),
+    }));
+
+  return rows.length ? { junket: 'infinity', rows } : null;
+}
+
+/**
+ * Infinity Cage's bulk daily-report screenshot: one table image covering
+ * many already-settled games, columns GAME START | ACCT No | GUEST |
+ * BUY-IN | CASH-OUT | ROLLING | RATE | COMMISSION | WIN/LOSS | GAME END.
+ * Unlike parseInfinityCage() (one step per message), every row here is
+ * already final, so this returns `{ junket, rows: [...] }` — ingest.js
+ * inserts one settlements row per entry instead of merging steps.
+ * Only reached when Claude vision (parseClaudeBulkRows() above) wasn't
+ * available or didn't run — the regex fallback below.
+ *
+ * Shaped against a REAL captured OCR sample (not just the rendered mockup),
+ * which turned out much noisier than a clean table: border "|" characters
+ * scattered mid-row, and individual numbers sometimes OCR'd into garbage
+ * with no digits at all ("sooo]", "of", "qf", "미 ee]") where tesseract
+ * couldn't read them. A single rigid per-row regex breaks the instant one
+ * token is garbled, so instead each row is parsed by anchor + region:
+ * find the account code, the parenthesized name, and the "N.NN%" rate
+ * (the one token that OCR'd cleanly on every row) as fixed points, then
+ * pull whatever valid amount-shaped tokens sit in the regions between them
+ * (name→rate = buy-in/cash-out/rolling, rate→game-end = commission/win-loss).
+ * If a region doesn't yield the expected count, every field in it is left
+ * null rather than guessed at a wrong position — a visible gap beats a
+ * silently wrong number in settlement data.
+ */
+function parseInfinityBulkReport(text) {
+  if (!/GAME\s*START/i.test(text) || !/GAME\s*END/i.test(text) || !/ROLLING/i.test(text)) {
+    return null;
+  }
+
+  // \s*,?\s* around the day/comma (not just a trailing ,?) because Google
+  // Vision's word tokenizer treats punctuation as its own token — "Sep 21,
+  // 22:19" comes back as "Sep 21 , 22:19", with a space *before* the comma
+  // too, which a plain `,?` right after \d{1,2} won't match.
+  const dateRe = /[A-Za-z]{3}\s*\d{1,2}\s*,?\s*\d{1,2}:\d{2}/g;
+  const acctRe = /[A-Z]{2,8}\d{2,}/;
+  const rateRe = /\d+(?:\.\d+)?\s*%/;
+  // Bare digit runs of any length (not just 3+) — a genuine cash-out of "0"
+  // is a single token GCV reads cleanly, not noise the way a stray digit
+  // could be from tesseract's per-character garbling. Region boundaries
+  // (name→rate, rate→game-end) already keep this from picking up anything
+  // outside a validated row.
+  const amountRe = /-?\d{1,3}(?:,\d{3})+|-?\d+/g;
+
+  const parseDate = (s) => {
+    if (!s) return null;
+    const when = new Date(`${s.replace(/\s*,\s*/, ' ')} ${new Date().getFullYear()}`);
+    return Number.isNaN(when.getTime()) ? null : when;
+  };
+  const amountsIn = (slice) => [...slice.matchAll(amountRe)].map((m) => parseAmount(m[0]));
+
+  const rows = [];
+  for (const rawLine of text.replace(/\|/g, ' ').split('\n')) {
+    const dates = [...rawLine.matchAll(dateRe)];
+    const acctMatch = rawLine.match(acctRe);
+    const rateMatch = rawLine.match(rateRe);
+    if (dates.length < 1 || !acctMatch || !rateMatch) continue; // not a data row
+
+    const nameMatch = rawLine.slice(acctMatch.index).match(/\(([^)]*)\)/);
+    const nameEnd = nameMatch
+      ? acctMatch.index + nameMatch.index + nameMatch[0].length
+      : acctMatch.index + acctMatch[0].length;
+    const gameStart = dates[0];
+    const gameEnd = dates.length > 1 ? dates[dates.length - 1] : null;
+
+    const midSlice = rawLine.slice(nameEnd, rateMatch.index);
+    const midMatches = [...midSlice.matchAll(amountRe)];
+    const midAmounts = midMatches.map((m) => parseAmount(m[0]));
+    // GUEST is whatever non-numeric text sits between the player's name and
+    // the first amount (e.g. "Bae Jongjin") — empty on most rows.
+    const guestText = (midMatches.length ? midSlice.slice(0, midMatches[0].index) : midSlice)
+      .replace(/\s+/g, ' ')
+      .trim();
+    const tailAmounts = amountsIn(
+      rawLine.slice(rateMatch.index + rateMatch[0].length, gameEnd ? gameEnd.index : rawLine.length)
+    );
+    const [buy_in, cashout, rolling] = midAmounts.length === 3 ? midAmounts : [null, null, null];
+    const [commission, win_loss] = tailAmounts.length === 2 ? tailAmounts : [null, null];
+
+    rows.push({
+      junket: 'infinity',
+      account_no: acctMatch[0],
+      account_name: null,
+      player_name: nameMatch ? cleanName(nameMatch[1]) : null,
+      guest: guestText || null,
+      game_no: null,
+      buy_in,
+      cashout,
+      rolling,
+      commission,
+      win_loss,
+      balance: null,
+      game_start: parseDate(gameStart[0]),
+      settled_at: parseDate(gameEnd ? gameEnd[0] : gameStart[0]),
+    });
+  }
+
+  return rows.length ? { junket: 'infinity', rows } : null;
+}
+
 function cleanName(value) {
   if (!value) return null;
   const cleaned = String(value)
@@ -567,8 +718,16 @@ function amountsOk(parsed) {
 export function parseSettlement(text) {
   if (!text || !String(text).trim()) return null;
 
+  // Checked before every other format: an unambiguous marker, not a guess.
+  const claudeBulk = parseClaudeBulkRows(text);
+  if (claudeBulk) return claudeBulk;
+
   const infinity = parseInfinityCage(text);
   if (infinity) return infinity;
+
+  const infinityBulk = parseInfinityBulkReport(text);
+  if (infinityBulk) return infinityBulk;
+
   // Ours but the step header wasn't recognised — don't let Win9 mangle it.
   if (/Infinity\s*Cage/i.test(text)) return null;
 

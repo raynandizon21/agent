@@ -5,20 +5,15 @@ import { useAuth } from '../AuthContext';
 import ConfirmDialog from '../ConfirmDialog';
 import { useRealtime } from '../useRealtime';
 
-function formatWhenParts(value) {
-  if (!value) return { dateStr: '—', timeStr: '' };
+// One-line "Mon DD, HH:mm" (no year, 24h) — the standard date+time format
+// across the app's tables (see the same shape in GuestsPage.jsx and
+// InboxPage.jsx).
+function formatWhen(value) {
+  if (!value) return '—';
   const d = new Date(value);
-  const dateStr = d.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-  const timeStr = d.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  return { dateStr, timeStr };
+  const datePart = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const timePart = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${datePart}, ${timePart}`;
 }
 
 function formatAmount(value) {
@@ -275,9 +270,7 @@ export default function SettlementsPage() {
             <thead className="bg-slate-950 text-slate-400 uppercase text-[13px] font-bold tracking-wider border-b border-slate-800 select-none">
               <tr>
                 <th className="py-2.5 px-3 whitespace-nowrap">Date</th>
-                <th className="py-2.5 px-2.5 whitespace-nowrap">Status</th>
                 <th className="py-2.5 px-2.5 whitespace-nowrap">Junket</th>
-                <th className="py-2.5 px-2.5 whitespace-nowrap">Game No.</th>
                 <th className="py-2.5 px-3 whitespace-nowrap">Account / Player</th>
                 <th className="py-2.5 px-3 whitespace-nowrap">Agent</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Buy-in</th>
@@ -286,28 +279,14 @@ export default function SettlementsPage() {
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Game Rate</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Commission</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">Win/Loss</th>
-                <th className="py-2.5 px-3 text-right whitespace-nowrap">Balance</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
               {pagedRows.map((s) => {
-                const { dateStr, timeStr } = formatWhenParts(s.settled_at || s.created_at);
                 return (
                 <tr key={s.id} className="hover:bg-slate-800/40 transition">
-                  <td className="py-2.5 px-3 whitespace-nowrap font-mono-num text-sm leading-tight">
-                    <div className="text-slate-200">{dateStr}</div>
-                    {timeStr ? <div className="text-slate-400 text-[14px] mt-0.5">{timeStr}</div> : null}
-                  </td>
-                  <td className="py-2.5 px-2.5 whitespace-nowrap font-sans">
-                    <span
-                      className={`text-[12px] uppercase font-semibold px-2 py-0.5 rounded border ${
-                        s.status === 'open'
-                          ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
-                          : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
-                      }`}
-                    >
-                      {s.status === 'open' ? s.step || 'open' : 'settled'}
-                    </span>
+                  <td className="py-2.5 px-3 whitespace-nowrap font-mono-num text-sm leading-tight text-slate-200">
+                    {formatWhen(s.settled_at || s.created_at)}
                   </td>
                   <td className="py-2.5 px-2.5 whitespace-nowrap font-sans">
                     <span
@@ -318,7 +297,6 @@ export default function SettlementsPage() {
                       {s.junket}
                     </span>
                   </td>
-                  <td className="py-2.5 px-2.5 whitespace-nowrap font-mono-num text-slate-300">{s.game_no || '—'}</td>
                   <td className="py-2.5 px-3 font-sans max-w-[220px]">
                     <div className="font-bold text-white font-mono-num text-sm whitespace-nowrap">
                       {s.account_no || '—'}
@@ -358,9 +336,6 @@ export default function SettlementsPage() {
                   >
                     {formatAmount(s.win_loss)}
                   </td>
-                  <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-slate-200 font-mono-num">
-                    {formatAmount(s.balance)}
-                  </td>
                 </tr>
                 );
               })}
@@ -368,7 +343,7 @@ export default function SettlementsPage() {
             {rows.length > 0 ? (
               <tfoot>
                 <tr className="border-t border-slate-800 bg-slate-950/70 font-bold">
-                  <td colSpan={6} className="py-3 px-3 text-slate-300">
+                  <td colSpan={4} className="py-3 px-3 text-slate-300">
                     Total
                   </td>
                   <td className="py-3 px-3 text-right text-slate-100">{formatAmount(totals.buy_in)}</td>
@@ -383,7 +358,6 @@ export default function SettlementsPage() {
                   >
                     {formatAmount(totals.win_loss)}
                   </td>
-                  <td className="py-3 px-3"></td>
                 </tr>
               </tfoot>
             ) : null}

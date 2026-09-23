@@ -4,6 +4,8 @@ import * as agentModel from '../models/agentModel.js';
 import * as botConfigModel from '../models/botConfigModel.js';
 import * as userModel from '../models/userModel.js';
 import { ingestMessage } from './ingest.js';
+import { extractBulkTableRows, looksLikeBulkReport, BULK_ROWS_MARKER } from './visionExtract.js';
+import { extractText as extractTextGoogle } from './googleVisionExtract.js';
 
 // Mutable — the bot token lives in the `bot_config` DB table
 // (server/models/botConfigModel.js), not .env, so the Telegram API admin
@@ -157,9 +159,41 @@ async function ocrPhoto(msg) {
   // Largest size is last in Telegram's photo array
   const best = photos[photos.length - 1];
   const buffer = await downloadTelegramFile(best.file_id);
+
+  // Google Cloud Vision, when configured, is tried FIRST and directly — not
+  // after running tesseract as a preliminary "does this look like a bulk
+  // report" scan. That earlier design paid for both engines sequentially on
+  // every bulk-report photo (tesseract's local recognize() is the slow one)
+  // for no benefit once GCV is available. GCV is also just a better OCR
+  // engine in general, not only for this one format, so it's the first
+  // thing tried for every photo now, not gated behind a format guess.
+  const gcvText = await extractTextGoogle(buffer);
+  if (gcvText) {
+    console.log(`[telegram] Google Cloud Vision OCR done (${gcvText.length} chars)`);
+    return gcvText;
+  }
+
+  // No GCV key configured, or the call failed — fall back to local tesseract.
   const worker = await getOcrWorker();
   const { data } = await worker.recognize(buffer);
-  return (data.text || '').trim();
+  const ocrText = (data.text || '').trim();
+
+  // tesseract is known to be unreliable specifically on Infinity Cage's
+  // bulk daily-report table (dense grid, small per-cell font — see
+  // visionExtract.js) — if the rough text looks like that format, try
+  // Claude vision on the same image for a much more accurate structured
+  // re-extraction before settling for tesseract's text.
+  if (looksLikeBulkReport(ocrText)) {
+    console.log('[telegram] bulk report detected, trying Claude vision…');
+    const rows = await extractBulkTableRows(buffer);
+    if (rows) {
+      console.log(`[telegram] Claude vision extracted ${rows.length} row(s)`);
+      return BULK_ROWS_MARKER + JSON.stringify(rows);
+    }
+    console.log('[telegram] Claude vision unavailable/failed, using tesseract text');
+  }
+
+  return ocrText;
 }
 
 async function resolveMessageText(msg) {

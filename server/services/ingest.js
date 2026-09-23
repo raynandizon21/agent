@@ -72,6 +72,20 @@ export async function ingestMessage({
         step: parsed.step,
       });
       matched = true;
+    } else if (parsed && Array.isArray(parsed.rows)) {
+      // Bulk report (e.g. Infinity's multi-game table) — every row is
+      // already a complete, settled entry, so each gets its own row via
+      // create() instead of one upsertStep() merge.
+      for (const row of parsed.rows) {
+        await settlementModel.create({
+          ...row,
+          messageId: logId,
+          agentId,
+          raw_text: body,
+        });
+      }
+      bus.emit(Events.SETTLEMENT, { messageId: logId, agentId, junket: parsed.junket });
+      matched = true;
     } else if (parsed) {
       await settlementModel.create({
         ...parsed,

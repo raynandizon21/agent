@@ -4,20 +4,15 @@ import { api } from '../api';
 import ConfirmDialog from '../ConfirmDialog';
 import { useRealtime } from '../useRealtime';
 
-function formatWhenParts(value) {
-  if (!value) return { dateStr: '—', timeStr: '' };
+// One-line "Mon DD, HH:mm" (no year, 24h) — the standard date+time format
+// across the app's tables (see the same shape in GuestsPage.jsx and
+// SettlementsPage.jsx).
+function formatWhen(value) {
+  if (!value) return '—';
   const d = new Date(value);
-  const dateStr = d.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-  const timeStr = d.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  return { dateStr, timeStr };
+  const datePart = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const timePart = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${datePart}, ${timePart}`;
 }
 
 const PAGE_SIZE = 20;
@@ -167,7 +162,6 @@ export default function InboxPage() {
       ) : (
         <div className="space-y-2">
           {pagedMessages.map((m) => {
-            const { dateStr, timeStr } = formatWhenParts(m.received_at);
             return (
             <div
               key={m.id}
@@ -190,8 +184,7 @@ export default function InboxPage() {
                   </div>
                 </div>
                 <div className="text-right shrink-0 leading-tight">
-                  <div className="text-[13px] text-slate-400 font-mono-num">{dateStr}</div>
-                  {timeStr ? <div className="text-[13px] text-slate-500 font-mono-num mt-0.5">{timeStr}</div> : null}
+                  <div className="text-[13px] text-slate-400 font-mono-num">{formatWhen(m.received_at)}</div>
                 </div>
               </div>
 
