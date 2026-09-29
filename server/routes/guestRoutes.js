@@ -9,6 +9,7 @@ const router = Router();
 // login sees and can manage every guest — same pattern as settlements.
 router.use(authMiddleware);
 router.get('/', guestController.list);
+router.get('/summary', guestController.summary);
 router.get('/:id/settlements', guestController.settlements);
 router.post('/', guestController.create);
 router.put('/:id', guestController.update);

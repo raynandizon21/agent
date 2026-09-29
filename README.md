@@ -118,6 +118,7 @@ src/
     InboxPage.jsx               raw message log: search, live status, clear-data
     AgentsPage.jsx               register/edit/deactivate Telegram ID -> agent mapping
     UsersPage.jsx                dashboard logins: create, scope to an agent, reset password, delete
+    StatementsPage.jsx           per-guest statement for a period: copy for Telegram, share, print/PDF (display-only numbers)
 
 sql/schema.sql            reference schema (server also self-migrates on boot)
 scripts/test-parse.mjs    run parser against sample messages for every format

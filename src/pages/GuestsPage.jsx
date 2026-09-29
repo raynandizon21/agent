@@ -1,10 +1,25 @@
-import { Calculator, Check, Edit2, Gamepad2, Loader2, Plus, Power, Search, Trash2, Users, X } from 'lucide-react';
+import {
+  Calculator,
+  Check,
+  Edit2,
+  Gamepad2,
+  Loader2,
+  Plus,
+  Power,
+  Search,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { useAuth } from '../AuthContext';
 import ConfirmDialog from '../ConfirmDialog';
+import CopyImageButton from '../components/common/CopyImageButton';
 import Modal from '../components/common/Modal';
 import Select from '../components/common/Select';
 import { effectiveCommission, effectiveRate } from '../lib/commission';
+import { renderGameRecordsImage } from '../lib/statementImage';
 
 function formatAmount(value) {
   if (value == null || value === '') return '—';
@@ -41,6 +56,55 @@ function junketBadgeSuffix(j) {
   if (j.commission_percent != null) parts.push(`${j.commission_percent}% rolling`);
   if (j.commission_rate != null) parts.push(`${j.commission_rate}% com`);
   return parts.length ? `· ${parts.join(' · ')}` : null;
+}
+
+// Compact "1.2M" style for the KPI tiles and guest cards, where the exact
+// figure lives in the tooltip / Game Records modal.
+function formatCompact(value) {
+  const n = Number(value) || 0;
+  return n.toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+}
+
+function formatSignedCompact(value) {
+  const n = Number(value) || 0;
+  return `${n > 0 ? '+' : ''}${formatCompact(n)}`;
+}
+
+// "3d ago" / "Today" — last-played recency for guest rows.
+function formatAgo(value) {
+  if (!value) return 'Never played';
+  const days = Math.floor((Date.now() - new Date(value).getTime()) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 30) return `${days}d ago`;
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function initials(name) {
+  return (name || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join('');
+}
+
+const EMPTY_STATS = { games: 0, buy_in: 0, cashout: 0, rolling: 0, commission: 0, win_loss: 0, last_played: null };
+
+function JunketChip({ j, size = 'sm' }) {
+  const meta = JUNKETS.find((jj) => jj.value === j.junket);
+  const suffix = junketBadgeSuffix(j);
+  return (
+    <span
+      className={`inline-flex flex-wrap items-center gap-x-1 rounded border font-mono-num ${
+        size === 'xs' ? 'text-[10px] px-1 py-px' : 'text-[12px] px-1.5 py-0.5'
+      } ${meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'}`}
+    >
+      <span className="font-bold uppercase tracking-wide">{j.junket}</span>
+      {j.account_no ? <span>· {j.account_no}</span> : null}
+      {suffix ? <span className="opacity-80">{suffix}</span> : null}
+    </span>
+  );
 }
 
 const PAGE_SIZE = 20;
@@ -304,6 +368,9 @@ function RecordsTable({ records, rolling, rate, rateLabel, commission, totals })
 export default function GuestsPage() {
   const [guests, setGuests] = useState([]);
   const [accountsByJunket, setAccountsByJunket] = useState({});
+  const { user } = useAuth();
+  const isAdmin = user?.agentId == null;
+  const [summary, setSummary] = useState({}); // { [guestId]: EMPTY_STATS shape }
   const [junketFilter, setJunketFilter] = useState('');
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
@@ -385,8 +452,9 @@ export default function GuestsPage() {
   async function load() {
     setError('');
     try {
-      const data = await api('/guests');
+      const [data, sum] = await Promise.all([api('/guests'), api('/guests/summary').catch(() => ({}))]);
       setGuests(data.guests || []);
+      setSummary(sum.summary || {});
     } catch (err) {
       setError(err.message || 'Failed to load guests');
     }
@@ -509,6 +577,8 @@ export default function GuestsPage() {
     }
   }
 
+  const statsOf = (g) => summary[g.id] || EMPTY_STATS;
+
   const filteredGuests = useMemo(() => {
     const query = q.trim().toLowerCase();
     return guests.filter((g) => {
@@ -518,10 +588,24 @@ export default function GuestsPage() {
         (g.guest_code || '').toLowerCase().includes(query) ||
         g.guest_name.toLowerCase().includes(query) ||
         String(g.telegram_id ?? '').toLowerCase().includes(query) ||
-        (g.agent_name || '').toLowerCase().includes(query)
+        (g.agent_name || '').toLowerCase().includes(query) ||
+        (g.junkets || []).some((j) => (j.account_no || '').toLowerCase().includes(query))
       );
     });
   }, [guests, junketFilter, q]);
+
+  const kpis = useMemo(() => {
+    const t = { active: 0, games: 0, rolling: 0, commission: 0, win_loss: 0 };
+    for (const g of filteredGuests) {
+      const st = summary[g.id] || EMPTY_STATS;
+      if (g.active) t.active += 1;
+      t.games += st.games;
+      t.rolling += st.rolling;
+      t.commission += st.commission;
+      t.win_loss += st.win_loss;
+    }
+    return t;
+  }, [filteredGuests, summary]);
 
   const totalPages = Math.max(1, Math.ceil(filteredGuests.length / PAGE_SIZE));
   useEffect(() => {
@@ -595,6 +679,24 @@ export default function GuestsPage() {
       }, { buy_in: 0, cashout: 0, rolling: 0, commission: 0, win_loss: 0, balance: 0 }),
     [visibleRecords, junketByAccount]
   );
+  // Game Records as a PNG (Copy image) — same numbers the table shows,
+  // i.e. effectiveRow()/customRate(), display-only.
+  function makeRecordsImage() {
+    const junketLabel = recordsJunketFilter
+      ? JUNKETS.find((j) => j.value === recordsJunketFilter)?.label || recordsJunketFilter
+      : 'All junkets';
+    const n = visibleRecords.length;
+    return renderGameRecordsImage({
+      guest: viewingGuest,
+      subtitle: `${junketLabel} · ${n} game${n === 1 ? '' : 's'}`,
+      rows: visibleRecords.map((r) => {
+        const eff = effectiveRow(r);
+        return { ...r, rolling: eff.rolling, commission: eff.commission, rate: customRate(r) };
+      }),
+      totals: recordsTotals,
+    });
+  }
+
   // `hasOriginal` tracks whether ANY row actually had a parseable original
   // commission — some junket messages (e.g. a garbled OCR read) never yield
   // one, and defaulting a missing value to 0 for the sum would otherwise
@@ -613,38 +715,96 @@ export default function GuestsPage() {
     [visibleRecords]
   );
 
+  const actionBtn =
+    'p-2 md:p-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-md transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed';
+
+  // Plain render helper (not a component) so rows don't remount each render.
+  function rowActions(g) {
+    const busyRow = rowBusy === g.id;
+    return (
+      <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+        <button type="button" onClick={() => openEdit(g)} disabled={busyRow} title="Edit" className={actionBtn}>
+          <Edit2 className="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => toggleActive(g)}
+          disabled={busyRow}
+          title={g.active ? 'Deactivate' : 'Activate'}
+          className={actionBtn}
+        >
+          {busyRow ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Power className={`w-3.5 h-3.5 ${g.active ? 'text-emerald-400' : 'text-slate-500'}`} />
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setToDelete(g)}
+          disabled={busyRow}
+          title="Delete"
+          className="p-2 md:p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  const wlTone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-slate-300');
+
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-slate-900 border border-slate-800">
-        <div>
-          <h1 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            <Users className="w-4 h-4 text-blue-400" />
-            Guests
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+            <Users className="w-5 h-5 text-blue-400" />
+            {isAdmin ? 'Guests' : 'My Guests'}
           </h1>
-          <p className="text-sm text-slate-400 mt-0.5">Guest/player directory — code, name, and Telegram id.</p>
         </div>
 
         <button
           type="button"
           onClick={openAdd}
-          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm font-semibold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shrink-0"
+          className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold flex items-center gap-1.5 transition cursor-pointer active:scale-95 shrink-0"
         >
-          <Plus className="w-3.5 h-3.5" />
-          Add guest
+          <Plus className="w-4 h-4" />
+          <span className="hidden sm:inline">Add guest</span>
+          <span className="sm:hidden">Add</span>
         </button>
+      </div>
+
+      {/* Totals — one compact strip, same style as the Settlements page. */}
+      <div className="grid grid-cols-4 gap-px rounded-lg bg-slate-800 border border-slate-800 overflow-hidden">
+        {[
+          { label: 'Guests', value: `${kpis.active}/${filteredGuests.length}`, title: `${kpis.active} active of ${filteredGuests.length}` },
+          { label: 'Rolling', value: formatCompact(kpis.rolling), title: formatAmount(kpis.rolling) },
+          { label: 'Commission', value: formatCompact(kpis.commission), title: formatAmount(kpis.commission), tone: 'text-amber-400' },
+          { label: 'W/L', value: formatSignedCompact(kpis.win_loss), title: formatAmount(kpis.win_loss), tone: wlTone(kpis.win_loss) },
+        ].map((k) => (
+          <div key={k.label} title={k.title} className="bg-slate-900 px-2 py-1.5 sm:px-3 sm:py-2.5 min-w-0">
+            <span className="text-[10px] sm:text-[12px] font-semibold uppercase tracking-wider block truncate text-slate-400">
+              {k.label}
+            </span>
+            <span className={`text-[13px] sm:text-base font-bold font-mono-num tracking-tight block truncate ${k.tone || 'text-slate-100'}`}>
+              {k.value}
+            </span>
+          </div>
+        ))}
       </div>
 
       {error ? <p className="text-rose-400 text-sm">{error}</p> : null}
       {ok ? <p className="text-emerald-400 text-sm">{ok}</p> : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-slate-900 border border-slate-800 text-sm">
-        <div className="relative flex-1 basis-full sm:basis-auto min-w-[200px]">
+      <div className="flex items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 rounded-lg bg-slate-900 border border-slate-800 text-sm">
+        <div className="relative flex-1 min-w-0">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search code, name, telegram ID, or agent…"
+            placeholder="Search guest…"
             className="w-full bg-slate-950 border border-slate-800 rounded-md pl-8 pr-7 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
           />
           {q && (
@@ -657,181 +817,167 @@ export default function GuestsPage() {
             </button>
           )}
         </div>
-
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <Select
-            value={junketFilter}
-            onChange={setJunketFilter}
-            options={[{ value: '', label: 'All junkets' }, ...JUNKETS]}
-            aria-label="Junket filter"
-            className="flex-1 sm:flex-none sm:min-w-[140px] bg-slate-950 border border-slate-800 rounded-md px-2.5 py-1.5 text-sm text-slate-300 focus:outline-hidden focus:border-blue-500"
-          />
-          <span className="text-[13px] font-mono-num text-slate-500 px-1 shrink-0">{filteredGuests.length} rows</span>
-        </div>
+        <Select
+          value={junketFilter}
+          onChange={setJunketFilter}
+          options={[{ value: '', label: 'All junkets' }, ...JUNKETS]}
+          aria-label="Junket filter"
+          className="w-[104px] sm:w-auto sm:min-w-[140px] shrink-0 bg-slate-950 border border-slate-800 rounded-md px-2 py-1.5 text-[13px] text-slate-300 focus:outline-hidden focus:border-blue-500"
+        />
       </div>
 
-      <div className="rounded-lg bg-slate-900 border border-slate-800 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse">
-            <thead>
-              <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 text-[11px] md:text-[14px] font-bold">
-                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">GUEST CODE</th>
-                <th className="py-2 md:py-2.5 px-2.5 md:px-3 whitespace-nowrap">
-                  <span className="md:hidden">GUEST</span>
-                  <span className="hidden md:inline">PLAYER NAME</span>
-                </th>
-                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">AGENT</th>
-                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">TELEGRAM ID</th>
-                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">JUNKETS</th>
-                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">STATUS</th>
-                <th className="py-2 md:py-2.5 px-2.5 md:px-3 text-right whitespace-nowrap">ACTIONS</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60">
-              {visibleGuests.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500">
-                    {guests.length === 0 ? 'No guests yet.' : 'No guests match your search.'}
-                  </td>
-                </tr>
-              ) : (
-                visibleGuests.map((g) => {
-                  const busyRow = rowBusy === g.id;
-                  return (
-                    <tr
-                      key={g.id}
-                      onClick={() => openView(g)}
-                      className="hover:bg-slate-800/40 transition group cursor-pointer"
-                    >
-                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap font-mono-num text-sm font-bold text-blue-400">
-                        {g.guest_code || '—'}
-                      </td>
-                      <td className="py-2 md:py-2.5 px-2.5 md:px-3 md:whitespace-nowrap text-slate-100 font-semibold max-md:w-full max-md:max-w-0">
-                        {/* Phones: everything but the actions folds into this one cell. */}
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span
-                            className={`md:hidden w-1.5 h-1.5 rounded-full shrink-0 ${g.active ? 'bg-emerald-400' : 'bg-rose-400'}`}
-                            title={g.active ? 'Active' : 'Deactivated'}
-                          />
-                          {g.guest_code ? (
-                            <span className="md:hidden font-mono-num text-blue-400 font-bold shrink-0">{g.guest_code}</span>
-                          ) : null}
-                          <span className="truncate">{g.guest_name}</span>
-                        </div>
-                        <div className="md:hidden text-[11px] text-slate-400 font-normal truncate">
-                          {g.agent_name || 'Unassigned'}
-                          {g.telegram_id != null ? <span className="font-mono-num"> · {g.telegram_id}</span> : null}
-                          {!g.active ? <span className="text-rose-400"> · Deactivated</span> : null}
-                        </div>
-                        {(g.junkets || []).length > 0 ? (
-                          <div className="md:hidden flex flex-wrap gap-1 mt-1">
-                            {g.junkets.map((j) => {
-                              const meta = JUNKETS.find((jj) => jj.value === j.junket);
-                              return (
-                                <span
-                                  key={j.junket}
-                                  className={`inline-flex flex-wrap items-center gap-x-1 text-[10px] font-normal px-1 py-px rounded border font-mono-num ${
-                                    meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
-                                  }`}
-                                >
-                                  <span className="font-bold uppercase">{j.junket}</span>
-                                  {j.account_no ? <span>· {j.account_no}</span> : null}
-                                  {junketBadgeSuffix(j) ? <span>{junketBadgeSuffix(j)}</span> : null}
-                                </span>
-                              );
-                            })}
-                          </div>
+      {visibleGuests.length === 0 ? (
+        <div className="p-10 text-center rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+          <Users className="w-7 h-7 text-slate-600 mx-auto" />
+          <p className="text-slate-400 text-sm">
+            {guests.length === 0 ? 'No guests yet — add your first guest to start tracking their games.' : 'No guests match your filters.'}
+          </p>
+          {guests.length === 0 ? (
+            <button
+              type="button"
+              onClick={openAdd}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> Add guest
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <>
+          {/* Phones: simple list — tap a row for records and actions. */}
+          <ul className="md:hidden rounded-lg bg-slate-900 border border-slate-800 divide-y divide-slate-800/80 overflow-hidden">
+            {visibleGuests.map((g) => {
+              const st = statsOf(g);
+              return (
+                <li key={g.id}>
+                  <button
+                    type="button"
+                    onClick={() => openView(g)}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left active:bg-slate-800/60 transition cursor-pointer ${
+                      g.active ? '' : 'opacity-50'
+                    }`}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-blue-500/15 text-blue-300 grid place-items-center text-[12px] font-bold shrink-0">
+                      {initials(g.guest_name)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-semibold text-slate-100 truncate">{g.guest_name}</span>
+                        {g.guest_code ? (
+                          <span className="font-mono-num text-[11px] text-blue-400 font-bold shrink-0">{g.guest_code}</span>
                         ) : null}
-                      </td>
-                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">
-                        {g.agent_name ? (
-                          <span className="font-medium text-slate-200">{g.agent_name}</span>
-                        ) : (
-                          <span className="text-slate-500 text-[14px] italic">Unassigned</span>
-                        )}
-                      </td>
-                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap font-mono-num text-slate-400">
-                        {g.telegram_id ?? '—'}
-                      </td>
-                      <td className="hidden md:table-cell py-2.5 px-3">
-                        {(g.junkets || []).length === 0 ? (
-                          <span className="text-slate-500 text-[14px] italic">—</span>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5 items-center max-w-md">
-                            {g.junkets.map((j) => {
-                              const meta = JUNKETS.find((jj) => jj.value === j.junket);
-                              return (
-                                <span
-                                  key={j.junket}
-                                  className={`inline-flex items-center gap-1 text-[13px] px-1.5 py-0.5 rounded border font-mono-num ${
-                                    meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
-                                  }`}
-                                >
-                                  <span className="font-bold uppercase tracking-wider">{j.junket}</span>
-                                  {j.account_no ? <span>· {j.account_no}</span> : null}
-                                  {junketBadgeSuffix(j) ? <span>{junketBadgeSuffix(j)}</span> : null}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </td>
-                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">
-                        <span
-                          className={`text-[13px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm border ${
-                            g.active
-                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
-                              : 'bg-rose-500/10 text-rose-300 border-rose-500/20'
-                          }`}
-                        >
-                          {g.active ? 'Active' : 'Deactivated'}
-                        </span>
-                      </td>
-                      <td className="py-2 md:py-2.5 px-2.5 md:px-3 text-right whitespace-nowrap align-top md:align-middle" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1 md:gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => openEdit(g)}
-                            disabled={busyRow}
-                            title="Edit"
-                            className="p-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-md transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleActive(g)}
-                            disabled={busyRow}
-                            title={g.active ? 'Deactivate' : 'Activate'}
-                            className="p-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-md transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
-                          >
-                            {busyRow ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Power className={`w-3.5 h-3.5 ${g.active ? 'text-emerald-400' : 'text-slate-500'}`} />
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setToDelete(g)}
-                            disabled={busyRow}
-                            title="Delete"
-                            className="p-1.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                      </div>
+                      <div className="text-[12px] text-slate-500 truncate">
+                        {formatAgo(st.last_played)}
+                        {st.games ? ` · ${st.games} game${st.games === 1 ? '' : 's'}` : ''}
+                        {!g.active ? ' · Inactive' : ''}
+                      </div>
+                    </div>
+                    <div className="text-right font-mono-num shrink-0 leading-tight">
+                      <div className="text-[13px] font-bold text-amber-400">{formatCompact(st.commission)}</div>
+                      <div className={`text-[11px] ${wlTone(st.win_loss)}`}>{formatSignedCompact(st.win_loss)}</div>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
 
-      {filteredGuests.length > 0 ? (
+          {/* Desktop: dense table. */}
+          <div className="hidden md:block rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 text-[12px] font-bold uppercase tracking-wide">
+                    <th className="py-2.5 px-3 whitespace-nowrap">Guest</th>
+                    {isAdmin ? <th className="py-2.5 px-3 whitespace-nowrap">Agent</th> : null}
+                    <th className="py-2.5 px-3 whitespace-nowrap">Junkets</th>
+                    <th className="py-2.5 px-3 text-right whitespace-nowrap">Rolling</th>
+                    <th className="py-2.5 px-3 text-right whitespace-nowrap">Commission</th>
+                    <th className="py-2.5 px-3 text-right whitespace-nowrap">W/L</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap">Last played</th>
+                    <th className="py-2.5 px-3 text-right whitespace-nowrap">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {visibleGuests.map((g) => {
+                    const st = statsOf(g);
+                    return (
+                      <tr
+                        key={g.id}
+                        onClick={() => openView(g)}
+                        className={`hover:bg-slate-800/40 transition cursor-pointer ${g.active ? '' : 'opacity-60'}`}
+                      >
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="relative shrink-0">
+                              <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-300 grid place-items-center text-[12px] font-bold">
+                                {initials(g.guest_name)}
+                              </div>
+                              <span
+                                title={g.active ? 'Active' : 'Deactivated'}
+                                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-900 ${
+                                  g.active ? 'bg-emerald-400' : 'bg-rose-400'
+                                }`}
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-100 truncate max-w-[220px]">{g.guest_name}</div>
+                              <div className="text-[12px] text-slate-500 font-mono-num whitespace-nowrap">
+                                {g.guest_code ? <span className="text-blue-400 font-bold">{g.guest_code}</span> : null}
+                                {g.guest_code && g.telegram_id != null ? ' · ' : ''}
+                                {g.telegram_id != null ? `TG ${g.telegram_id}` : ''}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        {isAdmin ? (
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {g.agent_name ? (
+                              <span className="font-medium text-slate-200">{g.agent_name}</span>
+                            ) : (
+                              <span className="text-slate-500 italic">Unassigned</span>
+                            )}
+                          </td>
+                        ) : null}
+                        <td className="py-2.5 px-3">
+                          {(g.junkets || []).length === 0 ? (
+                            <span className="text-slate-500 italic">—</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1 max-w-sm">
+                              {g.junkets.map((j) => (
+                                <JunketChip key={j.junket} j={j} />
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono-num font-bold text-slate-100">
+                          {formatAmount(st.rolling)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono-num font-bold text-amber-400">
+                          {formatAmount(st.commission)}
+                        </td>
+                        <td className={`py-2.5 px-3 text-right whitespace-nowrap font-mono-num font-bold ${wlTone(st.win_loss)}`}>
+                          {formatAmount(st.win_loss)}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap text-slate-400">
+                          <div>{formatAgo(st.last_played)}</div>
+                          <div className="text-[11px] text-slate-500">{st.games} game{st.games === 1 ? '' : 's'}</div>
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          {rowActions(g)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {filteredGuests.length > PAGE_SIZE ? (
         <div className="flex items-center justify-center sm:justify-end gap-3">
           <button
             type="button"
@@ -928,37 +1074,33 @@ export default function GuestsPage() {
       <Modal
         open={!!viewingGuest}
         onClose={() => setViewingGuest(null)}
-        title={viewingGuest ? `${viewingGuest.guest_name} — Game Records` : ''}
+        title={viewingGuest ? viewingGuest.guest_name : ''}
         icon={Gamepad2}
         maxWidth="max-w-7xl"
       >
         {viewingGuest ? (
           <div className="space-y-3 text-sm">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-              <div>
-                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Guest Code</span>
-                <span className="font-mono-num text-blue-400 font-bold">{viewingGuest.guest_code || '—'}</span>
-              </div>
-              <div>
-                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Telegram ID</span>
-                <span className="font-mono-num text-slate-200">{viewingGuest.telegram_id ?? '—'}</span>
-              </div>
-              <div>
-                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Agent</span>
-                <span className="text-slate-200">{viewingGuest.agent_name || 'Unassigned'}</span>
-              </div>
-              <div>
-                <span className="text-[11px] uppercase font-semibold text-slate-500 block">Status</span>
-                <span className={viewingGuest.active ? 'text-emerald-400' : 'text-rose-400'}>
-                  {viewingGuest.active ? 'Active' : 'Deactivated'}
-                </span>
-              </div>
+            {/* One compact info line instead of a 4-box grid. */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-slate-400">
+              <span
+                className={`inline-flex items-center gap-1 font-semibold ${
+                  viewingGuest.active ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${viewingGuest.active ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                {viewingGuest.active ? 'Active' : 'Inactive'}
+              </span>
+              {viewingGuest.guest_code ? (
+                <span className="font-mono-num text-blue-400 font-bold">· {viewingGuest.guest_code}</span>
+              ) : null}
+              {isAdmin ? <span>· {viewingGuest.agent_name || 'Unassigned'}</span> : null}
+              {viewingGuest.telegram_id != null ? (
+                <span className="font-mono-num">· TG {viewingGuest.telegram_id}</span>
+              ) : null}
             </div>
 
             <div>
-              <span className="text-[11px] uppercase font-semibold text-slate-500 block mb-1.5">
-                Linked Junket Accounts
-              </span>
+              <span className="text-[11px] uppercase font-semibold text-slate-500 block mb-1">Accounts</span>
               {(viewingGuest.junkets || []).length === 0 ? (
                 <span className="text-slate-500 text-sm italic">No junket accounts linked.</span>
               ) : (
@@ -975,7 +1117,7 @@ export default function GuestsPage() {
                       return (
                         <div
                           key={j.junket}
-                          className={`inline-flex flex-wrap items-center gap-1 text-[13px] px-2 py-1 rounded border font-mono-num ${badgeClass}`}
+                          className={`inline-flex flex-wrap items-center gap-1 text-[12px] px-1.5 py-0.5 rounded border font-mono-num ${badgeClass}`}
                         >
                           <span className="font-bold uppercase tracking-wider">{j.junket}</span>
                           <span className="text-[10px] opacity-70">Rolling</span>
@@ -1049,7 +1191,7 @@ export default function GuestsPage() {
                             commission_percent: j.commission_percent,
                           })
                         }
-                        className={`inline-flex flex-wrap items-center gap-x-1 text-left text-[13px] px-2 py-1 rounded border font-mono-num whitespace-nowrap cursor-pointer transition hover:brightness-125 hover:ring-1 hover:ring-white/30 ${badgeClass}`}
+                        className={`inline-flex flex-wrap items-center gap-x-1 text-left text-[12px] px-1.5 py-0.5 rounded border font-mono-num cursor-pointer transition hover:brightness-125 hover:ring-1 hover:ring-white/30 ${badgeClass}`}
                       >
                         <span className="font-bold uppercase tracking-wider">{j.junket}</span>
                         {j.account_no ? <span>· {j.account_no}</span> : null}
@@ -1062,30 +1204,42 @@ export default function GuestsPage() {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
-                <span className="text-[11px] uppercase font-semibold text-slate-500">Game Records</span>
-                <div className="flex items-center gap-1.5">
-                  {records.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowOriginal(true)}
-                      title="Original commission and game rate, derived from the raw settlement message — ignores any custom rate set on this guest's linked account"
-                      className="flex items-center gap-1 px-2 py-1 text-[13px] font-semibold text-blue-300 hover:text-white bg-blue-500/10 hover:bg-blue-600 rounded-md border border-blue-500/20 transition cursor-pointer"
-                    >
-                      <Calculator className="w-3.5 h-3.5" />
-                      Original data
-                    </button>
-                  ) : null}
-                  {recordJunkets.length > 1 ? (
-                    <Select
-                      value={recordsJunketFilter}
-                      onChange={setRecordsJunketFilter}
-                      options={[{ value: '', label: 'All junkets' }, ...recordJunkets]}
-                      aria-label="Filter game records by junket"
-                      className="min-w-[120px] bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[13px] text-slate-300 focus:outline-hidden focus:border-blue-500"
-                    />
-                  ) : null}
-                </div>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className="text-[11px] uppercase font-semibold text-slate-500">
+                  Game Records{records.length ? ` · ${visibleRecords.length}` : ''}
+                </span>
+                {recordJunkets.length > 1 ? (
+                  <Select
+                    value={recordsJunketFilter}
+                    onChange={setRecordsJunketFilter}
+                    options={[{ value: '', label: 'All junkets' }, ...recordJunkets]}
+                    aria-label="Filter game records by junket"
+                    className="min-w-[120px] bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[13px] text-slate-300 focus:outline-hidden focus:border-blue-500"
+                  />
+                ) : null}
+              </div>
+
+              {/* Actions: equal-width row on phones, compact on desktop. */}
+              <div className="grid grid-cols-2 sm:flex sm:justify-end gap-1.5 mb-2">
+                <CopyImageButton
+                  makeImage={makeRecordsImage}
+                  disabled={recordsLoading || visibleRecords.length === 0}
+                  onError={setRecordsError}
+                  className="flex items-center justify-center gap-1.5 min-w-0 px-2 py-1.5 text-[13px] font-semibold rounded-md border transition cursor-pointer text-white bg-blue-600 hover:bg-blue-500 border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOriginal(true)}
+                  disabled={records.length === 0}
+                  title="Original commission and game rate, derived from the raw settlement message — ignores any custom rate set on this guest's linked account"
+                  className="flex items-center justify-center gap-1.5 min-w-0 px-2 py-1.5 text-[13px] font-semibold rounded-md border transition cursor-pointer text-blue-300 hover:text-white bg-blue-500/10 hover:bg-blue-600 border-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Calculator className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
+                    <span className="sm:hidden">Original data</span>
+                    <span className="hidden sm:inline">Original data</span>
+                  </span>
+                </button>
               </div>
 
               {recordsError ? <p className="text-rose-400 text-sm">{recordsError}</p> : null}
@@ -1113,7 +1267,49 @@ export default function GuestsPage() {
               )}
             </div>
 
-            <div className="flex items-center justify-end pt-2 border-t border-slate-800">
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const g = viewingGuest;
+                    setViewingGuest(null);
+                    openEdit(g);
+                  }}
+                  title="Edit"
+                  className={actionBtn}
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await toggleActive(viewingGuest);
+                    setViewingGuest((v) => (v ? { ...v, active: !v.active } : v));
+                  }}
+                  disabled={rowBusy === viewingGuest.id}
+                  title={viewingGuest.active ? 'Deactivate' : 'Activate'}
+                  className={actionBtn}
+                >
+                  {rowBusy === viewingGuest.id ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Power className={`w-3.5 h-3.5 ${viewingGuest.active ? 'text-emerald-400' : 'text-slate-500'}`} />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const g = viewingGuest;
+                    setViewingGuest(null);
+                    setToDelete(g);
+                  }}
+                  title="Delete"
+                  className="p-2 md:p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => setViewingGuest(null)}

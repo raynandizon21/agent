@@ -134,7 +134,7 @@ export default function TripsPage() {
   }
 
   return (
-    <div className="space-y-3 max-w-6xl mx-auto">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -200,9 +200,9 @@ export default function TripsPage() {
       </div>
 
       {/* Desktop: the three columns side by side */}
-      <div className="hidden lg:grid grid-cols-3 gap-3">
+      <div className="hidden lg:grid grid-cols-3 gap-4 items-stretch">
         {TRIP_STATUSES.map((s) => (
-          <section key={s.value} className="bg-slate-900/40 border border-slate-800 rounded-2xl p-2.5 min-h-[300px]">
+          <section key={s.value} className="flex flex-col bg-slate-900/40 border border-slate-800 rounded-xl p-3 min-h-[calc(100dvh-15rem)]">
             <header className={`flex items-center justify-between px-2.5 py-1.5 mb-2 rounded-lg border ${s.active}`}>
               <span className="text-sm font-bold">{s.label}</span>
               <span className="text-xs tabular-nums font-semibold">{grouped[s.value].length}</span>
@@ -214,7 +214,7 @@ export default function TripsPage() {
             ) : grouped[s.value].length === 0 ? (
               <EmptyColumn label={s.label} />
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2 overflow-y-auto">
                 {grouped[s.value].map((t) => (
                   <TripCard key={t.id} trip={t} today={today} onOpen={openTrip} />
                 ))}

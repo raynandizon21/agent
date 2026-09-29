@@ -1,5 +1,8 @@
 import * as guestModel from '../models/guestModel.js';
 import * as settlementModel from '../models/settlementModel.js';
+// Same display-only formula the Guests page / Trips screen use, so the
+// per-guest totals here always match the Game Records modal to the peso.
+import { effectiveCommission } from '../../src/lib/commission.js';
 
 const KNOWN_JUNKETS = ['win9', 'galaxy', 'democage', 'infinity'];
 
@@ -58,6 +61,51 @@ export async function list(req, res) {
   } catch (err) {
     console.error('guests list error', err);
     return res.status(500).json({ error: 'Failed to load guests' });
+  }
+}
+
+// Per-guest roll-up for the Guests page cards and the Statements screen:
+// games played, buy-in/cashout, W/L, last played, plus ROLLING/COMMISSION
+// as *shown* (effectiveCommission() applied per row, exactly like the Game
+// Records modal). Read-only — nothing here touches `settlements`.
+export async function summary(req, res) {
+  try {
+    const agentId = req.user?.agentId ?? null;
+    const guests = await guestModel.listAll({ agentId });
+
+    const linkByAccount = new Map(); // "junket|account" -> { guestId, entry }
+    const pairs = [];
+    for (const g of guests) {
+      for (const j of g.junkets || []) {
+        if (!j.account_no) continue;
+        linkByAccount.set(`${j.junket}|${j.account_no}`, { guestId: g.id, entry: j });
+        pairs.push({ junket: j.junket, account_no: j.account_no });
+      }
+    }
+
+    const rows = await settlementModel.listByAccounts(pairs, { agentId });
+    const out = {};
+    for (const g of guests) {
+      out[g.id] = { games: 0, buy_in: 0, cashout: 0, rolling: 0, commission: 0, win_loss: 0, last_played: null };
+    }
+    for (const r of rows) {
+      const link = linkByAccount.get(`${r.junket}|${r.account_no}`);
+      if (!link) continue;
+      const eff = effectiveCommission({ ...r, game_rate: r.rate }, link.entry);
+      const t = out[link.guestId];
+      t.games += 1;
+      t.buy_in += Number(r.buy_in) || 0;
+      t.cashout += Number(r.cashout) || 0;
+      t.rolling += Number(eff.rolling) || 0;
+      t.commission += Number(eff.commission) || 0;
+      t.win_loss += Number(r.win_loss) || 0;
+      if (!t.last_played || new Date(r.created_at) > new Date(t.last_played)) t.last_played = r.created_at;
+    }
+
+    return res.json({ summary: out });
+  } catch (err) {
+    console.error('guest summary error', err);
+    return res.status(500).json({ error: 'Failed to load guest summary' });
   }
 }
 

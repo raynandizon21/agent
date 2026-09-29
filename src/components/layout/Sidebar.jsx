@@ -1,14 +1,15 @@
-import { Bot, Gamepad2, Plane, Radio, ShieldCheck, UserCheck, Users } from 'lucide-react';
+import { Bot, FileText, Gamepad2, Plane, Radio, ShieldCheck, UserCheck, Users } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const NAV_ITEMS = [
-  { to: '/', end: true, label: 'Settlements', icon: Gamepad2, adminOnly: false },
-  { to: '/trips', end: false, label: 'Trips', icon: Plane, adminOnly: false },
-  { to: '/messages', end: false, label: 'Messages', icon: Radio, adminOnly: true },
-  { to: '/agents', end: false, label: 'Agents', icon: UserCheck, adminOnly: true },
-  { to: '/guests', end: false, label: 'Guests', icon: Users, adminOnly: false },
-  { to: '/users', end: false, label: 'Users', icon: ShieldCheck, adminOnly: true },
-  { to: '/telegram', end: false, label: 'Telegram', icon: Bot, adminOnly: true },
+  { to: '/', end: true, label: 'Settlements', icon: Gamepad2, color: 'text-amber-400', adminOnly: false },
+  { to: '/trips', end: false, label: 'Trips', icon: Plane, color: 'text-sky-400', adminOnly: false },
+  { to: '/guests', end: false, label: 'Guests', icon: Users, color: 'text-violet-400', adminOnly: false },
+  { to: '/statements', end: false, label: 'Statements', icon: FileText, color: 'text-emerald-400', adminOnly: false },
+  { to: '/messages', end: false, label: 'Messages', icon: Radio, color: 'text-rose-400', adminOnly: true },
+  { to: '/agents', end: false, label: 'Agents', icon: UserCheck, color: 'text-teal-400', adminOnly: true },
+  { to: '/users', end: false, label: 'Users', icon: ShieldCheck, color: 'text-indigo-400', adminOnly: true },
+  { to: '/telegram', end: false, label: 'Telegram', icon: Bot, color: 'text-cyan-400', adminOnly: true },
 ];
 
 export default function Sidebar({ isAdmin }) {
@@ -34,7 +35,7 @@ export default function Sidebar({ isAdmin }) {
             >
               {({ isActive }) => (
                 <>
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-blue-400' : 'text-slate-400'}`} />
+                  <Icon className={`w-4 h-4 ${item.color}`} />
                   <span>{item.label}</span>
                 </>
               )}

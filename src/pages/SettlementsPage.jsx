@@ -155,64 +155,50 @@ export default function SettlementsPage() {
         </div>
       </div>
 
-      {/* KPI strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
-        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800">
-          <span className="text-[13px] font-semibold text-slate-400 uppercase tracking-wider block truncate">
-            Buy-in
-          </span>
-          <span className="text-sm sm:text-base font-bold text-slate-100 font-mono-num tracking-tight block mt-0.5 truncate">
-            {formatAmount(totals.buy_in)}
-          </span>
-        </div>
-        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800">
-          <span className="text-[13px] font-semibold text-slate-400 uppercase tracking-wider block truncate">
-            Cashout
-          </span>
-          <span className="text-sm sm:text-base font-bold text-slate-100 font-mono-num tracking-tight block mt-0.5 truncate">
-            {formatAmount(totals.cashout)}
-          </span>
-        </div>
-        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800">
-          <span className="text-[13px] font-semibold text-slate-400 uppercase tracking-wider block truncate">
-            Rolling
-          </span>
-          <span className="text-sm sm:text-base font-bold text-slate-100 font-mono-num tracking-tight block mt-0.5 truncate">
-            {formatAmount(totals.rolling)}
-          </span>
-        </div>
-        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800">
-          <span className="text-[13px] font-semibold text-amber-400/90 uppercase tracking-wider block truncate">
-            Commission
-          </span>
-          <span className="text-sm sm:text-base font-bold text-amber-400 font-mono-num tracking-tight block mt-0.5 truncate">
-            {formatAmount(totals.commission)}
-          </span>
-        </div>
-        <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800 col-span-2 sm:col-span-1">
-          <span className="text-[13px] font-semibold text-slate-400 uppercase tracking-wider block truncate">
-            Win / Loss
-          </span>
-          <span
-            className={`text-sm sm:text-base font-bold font-mono-num tracking-tight block mt-0.5 truncate ${
-              totals.win_loss >= 0 ? 'text-emerald-400' : 'text-rose-400'
+      {/* KPI strip — one compact panel. Phones: 6-col grid so row 1 is three cells
+          and row 2 (Commission, W/L) splits evenly and sits centered; desktop: 5 across. */}
+      <div className="grid grid-cols-6 sm:grid-cols-5 gap-px rounded-lg bg-slate-800 border border-slate-800 overflow-hidden">
+        {[
+          { label: 'Buy-in', value: formatAmount(totals.buy_in), tone: 'text-slate-100' },
+          { label: 'Cashout', value: formatAmount(totals.cashout), tone: 'text-slate-100' },
+          { label: 'Rolling', value: formatAmount(totals.rolling), tone: 'text-slate-100' },
+          { label: 'Commission', value: formatAmount(totals.commission), tone: 'text-amber-400', labelTone: 'text-amber-400/90', wide: true },
+          {
+            label: 'Win / Loss',
+            value: `${totals.win_loss >= 0 ? '+' : ''}${formatAmount(totals.win_loss)}`,
+            tone: totals.win_loss >= 0 ? 'text-emerald-400' : 'text-rose-400',
+            wide: true,
+          },
+        ].map((k) => (
+          <div
+            key={k.label}
+            className={`bg-slate-900 px-2 py-1.5 sm:px-3 sm:py-2.5 min-w-0 sm:col-span-1 ${
+              k.wide ? 'col-span-3 max-sm:text-center' : 'col-span-2'
             }`}
           >
-            {totals.win_loss >= 0 ? '+' : ''}
-            {formatAmount(totals.win_loss)}
-          </span>
-        </div>
+            <span
+              className={`text-[10px] sm:text-[12px] font-semibold uppercase tracking-wider block truncate ${
+                k.labelTone || 'text-slate-400'
+              }`}
+            >
+              {k.label}
+            </span>
+            <span className={`text-[13px] sm:text-base font-bold font-mono-num tracking-tight block truncate ${k.tone}`}>
+              {k.value}
+            </span>
+          </div>
+        ))}
       </div>
 
       {/* Search & filter bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-slate-900 border border-slate-800 text-sm">
-        <div className="relative flex-1 basis-full sm:basis-auto min-w-[180px]">
+      <div className="flex items-center justify-between gap-1.5 sm:gap-2 p-1.5 sm:p-2 rounded-lg bg-slate-900 border border-slate-800 text-sm">
+        <div className="relative flex-1 min-w-0">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search account, player, game no…"
+            placeholder="Search account, player, game…"
             className="w-full bg-slate-950 border border-slate-800 rounded-md pl-8 pr-7 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
           />
           {q && (
@@ -226,13 +212,13 @@ export default function SettlementsPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 w-full sm:w-auto">
+        <div className="flex items-center gap-1.5 shrink-0">
           <Select
             value={junket}
             onChange={setJunket}
             options={JUNKET_OPTIONS}
             aria-label="Junket filter"
-            className="flex-1 sm:flex-none sm:min-w-[140px] bg-slate-950 border border-slate-800 rounded-md px-2.5 py-1.5 text-sm text-slate-300 focus:outline-hidden focus:border-blue-500"
+            className="w-[118px] sm:w-auto sm:min-w-[140px] bg-slate-950 border border-slate-800 rounded-md px-2 sm:px-2.5 py-1.5 text-sm text-slate-300 focus:outline-hidden focus:border-blue-500"
           />
 
           {isAdmin ? (
@@ -244,7 +230,7 @@ export default function SettlementsPage() {
               className="shrink-0 px-2.5 py-1.5 text-sm font-semibold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-md transition border border-rose-500/20 flex items-center gap-1 cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              {clearing ? 'Clearing…' : 'Clear data'}
+              <span className="hidden sm:inline">{clearing ? 'Clearing…' : 'Clear data'}</span>
             </button>
           ) : null}
         </div>

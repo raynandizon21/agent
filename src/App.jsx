@@ -8,6 +8,7 @@ import GuestsPage from './pages/GuestsPage';
 import InboxPage from './pages/InboxPage';
 import LoginPage from './pages/LoginPage';
 import SettlementsPage from './pages/SettlementsPage';
+import StatementsPage from './pages/StatementsPage';
 import TelegramSettingsPage from './pages/TelegramSettingsPage';
 import TripDetailPage from './pages/TripDetailPage';
 import TripsPage from './pages/TripsPage';
@@ -87,6 +88,7 @@ export default function App() {
             }
           />
           <Route path="/guests" element={<GuestsPage />} />
+          <Route path="/statements" element={<StatementsPage />} />
           <Route path="/trips" element={<TripsPage />} />
           <Route path="/trips/:id" element={<TripDetailPage />} />
           <Route

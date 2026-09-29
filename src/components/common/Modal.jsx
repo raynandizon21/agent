@@ -5,11 +5,11 @@ export default function Modal({ open, onClose, title, icon: Icon, maxWidth = 'ma
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-start sm:items-center justify-center pt-[max(0.5rem,env(safe-area-inset-top))] px-2 sm:p-4 bg-black/70 backdrop-blur-xs"
       onClick={onClose}
     >
       <div
-        className={`bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl ${maxWidth} w-full p-3 sm:p-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5 shadow-2xl space-y-3 max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto`}
+        className={`bg-slate-900 border border-slate-800 rounded-2xl ${maxWidth} w-full p-3 sm:p-5 shadow-2xl space-y-3 max-h-[calc(100dvh-1rem)] sm:max-h-[90vh] overflow-y-auto`}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}

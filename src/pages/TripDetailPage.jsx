@@ -665,8 +665,8 @@ export default function TripDetailPage() {
   const status = TRIP_STATUSES.find((s) => s.value === tripStatus(trip));
 
   return (
-    <div className="max-w-3xl mx-auto space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="max-w-3xl lg:max-w-none mx-auto space-y-3 lg:space-y-0 lg:grid lg:grid-cols-[360px_minmax(0,1fr)] lg:gap-x-4 lg:gap-y-3 lg:items-start">
+      <div className="flex items-center justify-between lg:col-span-2">
         <Link to="/trips" className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-white py-1">
           <ArrowLeft className="w-4 h-4" /> Trips
         </Link>
@@ -680,7 +680,8 @@ export default function TripDetailPage() {
         </div>
       </div>
 
-      <header className="bg-slate-900/70 border border-slate-800 rounded-2xl p-3.5 space-y-2">
+      {/* Desktop: trip info pinned on the left, modules on the right. */}
+      <header className="bg-slate-900/70 border border-slate-800 rounded-2xl p-3.5 space-y-2 lg:sticky lg:top-20">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-white truncate">{trip.guest_name}</h2>
@@ -723,6 +724,7 @@ export default function TripDetailPage() {
         {trip.notes ? <p className="text-xs text-slate-400 whitespace-pre-wrap">{trip.notes}</p> : null}
       </header>
 
+      <div className="min-w-0 space-y-3">
       <nav className="grid grid-cols-4 gap-1 p-1 bg-slate-900 border border-slate-800 rounded-xl" aria-label="Trip modules">
         {TABS.map((t) => {
           const active = tab === t.value;
@@ -752,6 +754,7 @@ export default function TripDetailPage() {
       {tab === 'calendar' ? <CalendarTab trip={trip} days={derived.days} byDay={derived.byDay} /> : null}
       {tab === 'exchange' ? <ExchangeTab tripId={trip.id} exchanges={derived.exchanges} onChanged={load} /> : null}
       {tab === 'analysis' ? <AnalysisTab {...derived} /> : null}
+      </div>
 
       <TripFormModal
         open={editOpen}
