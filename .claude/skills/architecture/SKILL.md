@@ -110,8 +110,8 @@ structurally different kinds, both handled in `settlementParse.js`:
    since there are no buy-in/cashout/rolling amounts to find.
 
 ## Database (MySQL, self-migrating)
-Seven tables — `users`, `agents`, `guests`, `guest_junkets`, `bot_config`,
-`message_logs`, `settlements`. Reference DDL in
+Nine tables — `users`, `agents`, `guests`, `guest_junkets`, `guest_trips`,
+`trip_exchanges`, `bot_config`, `message_logs`, `settlements`. Reference DDL in
 [sql/schema.sql](../../../sql/schema.sql); each model's `ensureTable()`
 (called from `server/index.js` `main()`) creates/migrates on every boot via
 `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN` / `ADD UNIQUE KEY`, each guarded
@@ -153,6 +153,19 @@ endpoint when checked. `guestModel.listAll()` fetches `guests` and
 `guest_junkets` as two separate queries and merges them in JS (rather than
 one `GROUP_CONCAT`'d query) specifically so `ACCOUNT_NO` — which can contain
 arbitrary characters — never has to be split back out of a delimited string.
+
+`guest_trips` / `trip_exchanges` — one row per guest visit (schedule,
+flight nos, hotel) plus money exchanges logged against it. Powers the
+**Trips** page (`/trips`, board of Coming / Staying / Finished — status is
+*derived from the dates* in [src/lib/trips.js](../../../src/lib/trips.js),
+never stored) and the trip detail screen (`/trips/:id`, tabs Casino /
+Calendar / Exchange / Analysis). Ownership follows the guest's `AGENT_ID`
+(no copied column). Casino data is the guest's linked accounts' settlements
+filtered to arrival 00:00 → end of departure day by
+`COALESCE(game_start, settled_at, created_at)`, in `tripController.detail`.
+Dates are selected with `DATE_FORMAT(..., '%Y-%m-%d')` so mysql2 never turns
+them into timezone-shifted JS Dates. Custom Rolling %/Com % display logic is
+shared with the Guests page via [src/lib/commission.js](../../../src/lib/commission.js).
 
 `agents` — maps a Telegram id to a name; `is_active` supports deactivating
 without losing history (FKs from `message_logs`/`settlements` are
@@ -268,12 +281,15 @@ server/
     settlementModel.js          settlements CRUD, step-merge upsert, listAccounts() (per-junket distinct accounts, powers Guests linking), ensureTable()/ensureColumn(), agentId filter
     agentModel.js                agents CRUD (name/telegram_id/is_active)
     userModel.js                 dashboard logins CRUD, agent_id link, countAdmins() safety check
+    tripModel.js                  guest_trips + trip_exchanges CRUD, ensureTable()
     guestModel.js                 guests CRUD + guest_junkets many-to-many (setJunkets), ensureTable() incl. the composite->IDNo PK migration
     botConfigModel.js             singleton bot_config row (BOT_TOKEN), read live by telegram.js on every poll
 
 src/pages/
   AgentsPage.jsx                 chat-id maintenance: add/edit/deactivate/delete, sender vs receiver
   UsersPage.jsx                   logins: create, scope to an agent, reset password, delete — admin-only
+  TripsPage.jsx                   Coming/Staying/Finished board (phone: segmented tabs; desktop: 3 columns) + register FAB
+  TripDetailPage.jsx              per-trip Casino / Calendar / Exchange / Analysis tabs (?tab= in URL)
   GuestsPage.jsx                  guest directory + JunketPicker (checkbox reveals a <select> of real accounts per junket, from GET /settlements/accounts)
 
 sql/schema.sql                 reference DDL (server also self-migrates on boot)

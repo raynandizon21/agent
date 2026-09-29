@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ConfirmDialog from '../ConfirmDialog';
 import Modal from '../components/common/Modal';
+import { effectiveCommission, effectiveRate } from '../lib/commission';
 
 function formatAmount(value) {
   if (value == null || value === '') return '—';
@@ -445,40 +446,15 @@ export default function GuestsPage() {
     return map;
   }, [viewingGuest]);
   // Hybrid: Rolling % and Com % can both be set on the same account (see
-  // JunketPicker). Rolling % always discounts ROLLING for this display; the
-  // rate multiplied against that discounted ROLLING to get COMMISSION is
-  // the custom Com % when set, else the junket's original game rate — kept
-  // in sync with customRate() below so RATE × ROLLING / 100 = COMMISSION
-  // reads correctly left to right in the table.
+  // JunketPicker). The formulas live in src/lib/commission.js (shared with
+  // the Trips detail screen) — display-only, never written to settlements.
   function effectiveRow(r) {
-    const entry = junketByAccount[`${r.junket}|${r.account_no}`];
-    if (entry?.commission_percent != null) {
-      const rolling =
-        r.rolling != null ? Math.round((Number(r.rolling) * entry.commission_percent) / 100) : null;
-      const rate = entry.commission_rate ?? r.game_rate;
-      const commission = rolling != null && rate != null ? Math.round((rolling * rate) / 100) : null;
-      return { rolling, commission };
-    }
-    if (entry?.commission_rate != null) {
-      // Com % alone: real ROLLING shown unchanged, COMMISSION is a display-
-      // only ROLLING × rate — never written back to settlements.COMMISSION
-      // (r.commission is always the junket's real, untouched value).
-      const commission =
-        r.rolling != null ? Math.round((Number(r.rolling) * entry.commission_rate) / 100) : null;
-      return { rolling: r.rolling, commission };
-    }
-    return { rolling: r.rolling, commission: r.commission };
+    return effectiveCommission(r, junketByAccount[`${r.junket}|${r.account_no}`]);
   }
-  // The RATE column: with a Rolling % set, this is whatever rate actually
-  // produced the discounted COMMISSION above (custom Com % if also set,
-  // else the original game rate). With only a Com % set (no Rolling %),
-  // it's that custom rate directly — the rate driving the displayed
-  // (display-only) commission above.
+  // The RATE column, kept in sync with effectiveRow() so RATE × ROLLING /
+  // 100 = COMMISSION reads correctly left to right in the table.
   function customRate(r) {
-    const entry = junketByAccount[`${r.junket}|${r.account_no}`];
-    if (entry?.commission_percent != null) return entry.commission_rate ?? r.game_rate;
-    if (entry?.commission_rate != null) return entry.commission_rate;
-    return null;
+    return effectiveRate(r, junketByAccount[`${r.junket}|${r.account_no}`]);
   }
   const recordsTotals = useMemo(
     () =>

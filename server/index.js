@@ -8,6 +8,7 @@ import * as botConfigModel from './models/botConfigModel.js';
 import * as guestModel from './models/guestModel.js';
 import * as messageModel from './models/messageModel.js';
 import * as settlementModel from './models/settlementModel.js';
+import * as tripModel from './models/tripModel.js';
 import * as userModel from './models/userModel.js';
 import routes from './routes/index.js';
 import { attachRealtime } from './realtime.js';
@@ -53,6 +54,7 @@ async function main() {
   await pool.query('SELECT 1');
   await agentModel.ensureTable();
   await guestModel.ensureTable();
+  await tripModel.ensureTable();
   await botConfigModel.ensureTable({ botToken: config.telegramBotToken });
   await userModel.ensureTable();
   await messageModel.ensureTable();

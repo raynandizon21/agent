@@ -5,6 +5,7 @@ import agentRoutes from './agentRoutes.js';
 import guestRoutes from './guestRoutes.js';
 import messageRoutes from './messageRoutes.js';
 import settlementRoutes from './settlementRoutes.js';
+import tripRoutes from './tripRoutes.js';
 import userRoutes from './userRoutes.js';
 import telegramConfigRoutes from './telegramConfigRoutes.js';
 
@@ -18,6 +19,7 @@ router.use('/agents', agentRoutes);
 router.use('/guests', guestRoutes);
 router.use('/messages', messageRoutes);
 router.use('/settlements', settlementRoutes);
+router.use('/trips', tripRoutes);
 router.use('/users', userRoutes);
 router.use('/telegram-config', telegramConfigRoutes);
 

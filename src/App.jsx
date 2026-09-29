@@ -9,6 +9,8 @@ import InboxPage from './pages/InboxPage';
 import LoginPage from './pages/LoginPage';
 import SettlementsPage from './pages/SettlementsPage';
 import TelegramSettingsPage from './pages/TelegramSettingsPage';
+import TripDetailPage from './pages/TripDetailPage';
+import TripsPage from './pages/TripsPage';
 import UsersPage from './pages/UsersPage';
 
 function Shell() {
@@ -85,6 +87,8 @@ export default function App() {
             }
           />
           <Route path="/guests" element={<GuestsPage />} />
+          <Route path="/trips" element={<TripsPage />} />
+          <Route path="/trips/:id" element={<TripDetailPage />} />
           <Route
             path="/users"
             element={

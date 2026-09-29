@@ -1,8 +1,9 @@
-import { Bot, Gamepad2, Radio, ShieldCheck, UserCheck, Users } from 'lucide-react';
+import { Bot, Gamepad2, Plane, Radio, ShieldCheck, UserCheck, Users } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const NAV_ITEMS = [
   { to: '/', end: true, label: 'Settlements', icon: Gamepad2, adminOnly: false },
+  { to: '/trips', end: false, label: 'Trips', icon: Plane, adminOnly: false },
   { to: '/messages', end: false, label: 'Messages', icon: Radio, adminOnly: true },
   { to: '/agents', end: false, label: 'Agents', icon: UserCheck, adminOnly: true },
   { to: '/guests', end: false, label: 'Guests', icon: Users, adminOnly: false },
