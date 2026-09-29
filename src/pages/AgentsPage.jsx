@@ -210,11 +210,11 @@ export default function AgentsPage() {
           <table className="w-full text-left text-sm border-collapse">
             <thead>
               <tr className="border-b border-slate-800 bg-slate-950/70 text-slate-400 text-[14px] font-bold select-none">
-                <th className="py-2.5 px-3.5 whitespace-nowrap">NAME</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">TELEGRAM ID</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">ACTIVE</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">CREATED</th>
-                <th className="py-2.5 px-3.5 text-right whitespace-nowrap">ACTIONS</th>
+                <th className="py-2.5 px-2.5 md:px-3.5 whitespace-nowrap">NAME</th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">TELEGRAM ID</th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">ACTIVE</th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">CREATED</th>
+                <th className="py-2.5 px-2.5 md:px-3.5 text-right whitespace-nowrap">ACTIONS</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -229,22 +229,31 @@ export default function AgentsPage() {
                   const busyRow = rowBusy === a.id;
                   return (
                     <tr key={a.id} className="hover:bg-slate-800/40 transition group">
-                      <td className="py-2.5 px-3.5 whitespace-nowrap">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-slate-200 text-sm font-mono-num">
+                      <td className="py-2.5 px-2.5 md:px-3.5 whitespace-nowrap max-md:w-full max-md:max-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-slate-200 text-sm font-mono-num shrink-0">
                             {a.name.slice(0, 2).toUpperCase()}
                           </div>
-                          <span className="text-sm font-bold text-white group-hover:text-blue-400 transition">
-                            {a.name}
-                          </span>
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-white group-hover:text-blue-400 transition truncate">
+                              {a.name}
+                            </div>
+                            <div className="md:hidden text-[11px] font-mono-num text-slate-400 truncate">
+                              {a.telegram_id}
+                              <span className={a.is_active ? 'text-emerald-400' : 'text-slate-500'}>
+                                {' · '}
+                                {a.is_active ? 'Active' : 'Inactive'}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap">
+                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">
                         <span className="font-mono-num text-sm text-slate-300 bg-slate-950/80 px-2 py-0.5 rounded border border-slate-800">
                           {a.telegram_id}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap">
+                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">
                         <span
                           className={`text-[13px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm border ${
                             a.is_active
@@ -255,10 +264,10 @@ export default function AgentsPage() {
                           {a.is_active ? 'Yes' : 'No'}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap font-mono-num text-slate-400 text-[14px]">
+                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap font-mono-num text-slate-400 text-[14px]">
                         {new Date(a.created_at).toLocaleString()}
                       </td>
-                      <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                      <td className="py-2.5 px-2.5 md:px-3.5 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
@@ -303,7 +312,7 @@ export default function AgentsPage() {
       </div>
 
       {filteredAgents.length > 0 ? (
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-center sm:justify-end gap-3">
           <button
             type="button"
             onClick={() => setPage((p) => Math.max(1, p - 1))}

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import ConfirmDialog from '../ConfirmDialog';
 import Modal from '../components/common/Modal';
+import Select from '../components/common/Select';
 import { effectiveCommission, effectiveRate } from '../lib/commission';
 
 function formatAmount(value) {
@@ -78,7 +79,7 @@ function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) 
           (a) => a.account_no === entry?.account_no || !used?.has(a.account_no)
         );
         return (
-          <div key={j.value} className="flex items-center gap-2">
+          <div key={j.value} className="flex flex-wrap sm:flex-nowrap items-center gap-2">
             <label className="flex items-center gap-1.5 cursor-pointer text-sm text-slate-200 w-24 shrink-0">
               <input
                 type="checkbox"
@@ -99,26 +100,25 @@ function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) 
             </label>
             {entry ? (
               <>
-                <select
+                <Select
                   value={entry.account_no || ''}
-                  onChange={(e) =>
+                  onChange={(accountNo) =>
                     onChange(
                       value.map((v) =>
-                        v.junket === j.value ? { ...v, account_no: e.target.value || null } : v
+                        v.junket === j.value ? { ...v, account_no: accountNo || null } : v
                       )
                     )
                   }
-                  className="flex-1 min-w-0 w-0 truncate bg-slate-950 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 font-mono-num focus:outline-hidden"
-                >
-                  <option value="">Select account…</option>
-                  {options.map((a) => (
-                    <option key={a.account_no} value={a.account_no}>
-                      {a.account_no}
-                      {a.player_name ? ` — ${a.player_name}` : ''}
-                    </option>
-                  ))}
-                </select>
-                <div className="flex items-center gap-1 shrink-0">
+                  options={[
+                    { value: '', label: 'Select account…' },
+                    ...options.map((a) => ({
+                      value: a.account_no,
+                      label: `${a.account_no}${a.player_name ? ` — ${a.player_name}` : ''}`,
+                    })),
+                  ]}
+                  className="flex-1 min-w-0 w-0 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 font-mono-num focus:outline-hidden focus:border-blue-500"
+                />
+                <div className="flex items-center gap-1 shrink-0 w-full sm:w-auto pl-[6.5rem] sm:pl-0">
                   <span className="text-[10px] uppercase font-bold text-slate-500">Rolling</span>
                   <div className="relative w-16">
                     <input
@@ -173,6 +173,130 @@ function JunketPicker({ value, onChange, accountsByJunket, usedAccounts = {} }) 
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// Game Records / Original Data table, shared by both modals. The
+// rolling/rate/commission accessors carry each modal's own numbers —
+// effectiveRow()/customRate() for Game Records, the junket's untouched raw
+// values for Original Data — so this stays purely presentational. On phones
+// the 10 columns fold into 4 (Account, In/Out, Roll/Com, W/L) so the table
+// fits the screen without side-scrolling.
+function RecordsTable({ records, rolling, rate, rateLabel, commission, totals }) {
+  const wlClass = (v) => (Number(v) >= 0 ? 'text-emerald-400' : 'text-rose-400');
+  return (
+    <div className="rounded-lg border border-slate-800 overflow-auto max-h-[60dvh] md:max-h-[28rem]">
+      <table className="w-full text-left text-[11px] md:text-[13px] border-collapse">
+        <thead className="sticky top-0">
+          <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 text-[10px] md:text-[11px] font-bold">
+            <th className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap">DATE</th>
+            <th className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap">JUNKET</th>
+            <th className="py-2 px-2 md:px-2.5 whitespace-nowrap">
+              <span className="md:hidden">ACCOUNT</span>
+              <span className="hidden md:inline">ACCOUNT NO.</span>
+            </th>
+            <th className="hidden md:table-cell py-2 px-2.5">GUEST</th>
+            <th className="md:hidden py-2 px-1 text-right whitespace-nowrap">IN / OUT</th>
+            <th className="md:hidden py-2 px-1 text-right whitespace-nowrap">ROLL / COM</th>
+            <th className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap">BUY-IN</th>
+            <th className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap">CASHOUT</th>
+            <th className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap">ROLLING</th>
+            <th className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap">{rateLabel}</th>
+            <th className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap">COMMISSION</th>
+            <th className="py-2 px-2 md:px-2.5 text-right whitespace-nowrap">W/L</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-800/60 bg-slate-900">
+          {records.map((r) => {
+            const meta = JUNKETS.find((jj) => jj.value === r.junket);
+            const badge = meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700';
+            return (
+              <tr key={r.id} className="hover:bg-slate-800/40 transition">
+                <td className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-400">
+                  {formatWhen(r.created_at)}
+                </td>
+                <td className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap">
+                  <span className={`inline-block uppercase font-bold text-[11px] px-1.5 py-0.5 rounded border ${badge}`}>
+                    {r.junket}
+                  </span>
+                </td>
+                <td className="py-2 px-2 md:px-2.5 whitespace-nowrap font-mono-num text-slate-300 max-md:max-w-[120px]">
+                  <div className="flex items-center gap-1">
+                    <span className="max-md:font-bold max-md:text-slate-100">{r.account_no || '—'}</span>
+                    <span className={`md:hidden uppercase font-bold text-[8px] px-1 rounded-sm border ${badge}`}>
+                      {r.junket}
+                    </span>
+                  </div>
+                  <div className="md:hidden text-slate-400 font-sans truncate">{r.player_name || '—'}</div>
+                  <div className="md:hidden text-[10px] text-slate-500">
+                    {formatWhen(r.created_at)}
+                    {rate(r) != null ? ` · ${formatRate(rate(r))}` : ''}
+                  </div>
+                </td>
+                <td className="hidden md:table-cell py-2 px-2.5 text-slate-200 truncate max-w-[180px]" title={r.player_name || ''}>
+                  {r.player_name || '—'}
+                </td>
+                <td className="md:hidden py-2 px-1 text-right whitespace-nowrap font-mono-num leading-snug">
+                  <div className="font-bold text-slate-200">{formatAmount(r.buy_in)}</div>
+                  <div className="text-slate-400">{formatAmount(r.cashout)}</div>
+                </td>
+                <td className="md:hidden py-2 px-1 text-right whitespace-nowrap font-mono-num leading-snug">
+                  <div className="font-bold text-slate-100">{formatAmount(rolling(r))}</div>
+                  <div className="text-amber-400">{formatAmount(commission(r))}</div>
+                </td>
+                <td className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
+                  {formatAmount(r.buy_in)}
+                </td>
+                <td className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
+                  {formatAmount(r.cashout)}
+                </td>
+                <td className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100">
+                  {formatAmount(rolling(r))}
+                </td>
+                <td className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100 font-mono-num">
+                  {formatRate(rate(r))}
+                </td>
+                <td className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap font-bold text-amber-400">
+                  {formatAmount(commission(r))}
+                </td>
+                <td className={`py-2 px-2 md:px-2.5 text-right whitespace-nowrap font-bold font-mono-num ${wlClass(r.win_loss)}`}>
+                  {formatAmount(r.win_loss)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot className="sticky bottom-0">
+          <tr className="md:hidden border-t border-slate-700 bg-slate-950 font-bold font-mono-num">
+            <td className="py-2 px-2 whitespace-nowrap text-slate-400 font-sans">TOTAL</td>
+            <td className="py-2 px-1 text-right whitespace-nowrap leading-snug">
+              <div className="text-slate-100">{formatAmount(totals.buy_in)}</div>
+              <div className="text-slate-400">{formatAmount(totals.cashout)}</div>
+            </td>
+            <td className="py-2 px-1 text-right whitespace-nowrap leading-snug">
+              <div className="text-slate-100">{formatAmount(totals.rolling)}</div>
+              <div className="text-amber-400">{formatAmount(totals.commission)}</div>
+            </td>
+            <td className={`py-2 px-2 text-right whitespace-nowrap ${wlClass(totals.win_loss)}`}>
+              {formatAmount(totals.win_loss)}
+            </td>
+          </tr>
+          <tr className="hidden md:table-row border-t border-slate-700 bg-slate-950 font-bold">
+            <td className="py-2 px-2.5 whitespace-nowrap text-slate-400" colSpan={4}>
+              GRAND TOTAL
+            </td>
+            <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">{formatAmount(totals.buy_in)}</td>
+            <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">{formatAmount(totals.cashout)}</td>
+            <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">{formatAmount(totals.rolling)}</td>
+            <td className="py-2 px-2.5"></td>
+            <td className="py-2 px-2.5 text-right whitespace-nowrap text-amber-400">{formatAmount(totals.commission)}</td>
+            <td className={`py-2 px-2.5 text-right whitespace-nowrap ${wlClass(totals.win_loss)}`}>
+              {formatAmount(totals.win_loss)}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
@@ -514,7 +638,7 @@ export default function GuestsPage() {
       {ok ? <p className="text-emerald-400 text-sm">{ok}</p> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-slate-900 border border-slate-800 text-sm">
-        <div className="relative flex-1 min-w-[200px]">
+        <div className="relative flex-1 basis-full sm:basis-auto min-w-[200px]">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -534,21 +658,15 @@ export default function GuestsPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
-          <select
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Select
             value={junketFilter}
-            onChange={(e) => setJunketFilter(e.target.value)}
+            onChange={setJunketFilter}
+            options={[{ value: '', label: 'All junkets' }, ...JUNKETS]}
             aria-label="Junket filter"
-            className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1.5 text-sm text-slate-300 focus:outline-hidden cursor-pointer"
-          >
-            <option value="">All junkets</option>
-            {JUNKETS.map((j) => (
-              <option key={j.value} value={j.value}>
-                {j.label}
-              </option>
-            ))}
-          </select>
-          <span className="text-[13px] font-mono-num text-slate-500 px-1">{filteredGuests.length} rows</span>
+            className="flex-1 sm:flex-none sm:min-w-[140px] bg-slate-950 border border-slate-800 rounded-md px-2.5 py-1.5 text-sm text-slate-300 focus:outline-hidden focus:border-blue-500"
+          />
+          <span className="text-[13px] font-mono-num text-slate-500 px-1 shrink-0">{filteredGuests.length} rows</span>
         </div>
       </div>
 
@@ -556,14 +674,17 @@ export default function GuestsPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm border-collapse">
             <thead>
-              <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 text-[14px] font-bold">
-                <th className="py-2.5 px-3 whitespace-nowrap">GUEST CODE</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">PLAYER NAME</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">AGENT</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">TELEGRAM ID</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">JUNKETS</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">STATUS</th>
-                <th className="py-2.5 px-3 text-right whitespace-nowrap">ACTIONS</th>
+              <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 text-[11px] md:text-[14px] font-bold">
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">GUEST CODE</th>
+                <th className="py-2 md:py-2.5 px-2.5 md:px-3 whitespace-nowrap">
+                  <span className="md:hidden">GUEST</span>
+                  <span className="hidden md:inline">PLAYER NAME</span>
+                </th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">AGENT</th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">TELEGRAM ID</th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">JUNKETS</th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">STATUS</th>
+                <th className="py-2 md:py-2.5 px-2.5 md:px-3 text-right whitespace-nowrap">ACTIONS</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -582,23 +703,57 @@ export default function GuestsPage() {
                       onClick={() => openView(g)}
                       className="hover:bg-slate-800/40 transition group cursor-pointer"
                     >
-                      <td className="py-2.5 px-3 whitespace-nowrap font-mono-num text-sm font-bold text-blue-400">
+                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap font-mono-num text-sm font-bold text-blue-400">
                         {g.guest_code || '—'}
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap text-slate-100 font-semibold">
-                        {g.guest_name}
+                      <td className="py-2 md:py-2.5 px-2.5 md:px-3 md:whitespace-nowrap text-slate-100 font-semibold max-md:w-full max-md:max-w-0">
+                        {/* Phones: everything but the actions folds into this one cell. */}
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className={`md:hidden w-1.5 h-1.5 rounded-full shrink-0 ${g.active ? 'bg-emerald-400' : 'bg-rose-400'}`}
+                            title={g.active ? 'Active' : 'Deactivated'}
+                          />
+                          {g.guest_code ? (
+                            <span className="md:hidden font-mono-num text-blue-400 font-bold shrink-0">{g.guest_code}</span>
+                          ) : null}
+                          <span className="truncate">{g.guest_name}</span>
+                        </div>
+                        <div className="md:hidden text-[11px] text-slate-400 font-normal truncate">
+                          {g.agent_name || 'Unassigned'}
+                          {g.telegram_id != null ? <span className="font-mono-num"> · {g.telegram_id}</span> : null}
+                          {!g.active ? <span className="text-rose-400"> · Deactivated</span> : null}
+                        </div>
+                        {(g.junkets || []).length > 0 ? (
+                          <div className="md:hidden flex flex-wrap gap-1 mt-1">
+                            {g.junkets.map((j) => {
+                              const meta = JUNKETS.find((jj) => jj.value === j.junket);
+                              return (
+                                <span
+                                  key={j.junket}
+                                  className={`inline-flex flex-wrap items-center gap-x-1 text-[10px] font-normal px-1 py-px rounded border font-mono-num ${
+                                    meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
+                                  }`}
+                                >
+                                  <span className="font-bold uppercase">{j.junket}</span>
+                                  {j.account_no ? <span>· {j.account_no}</span> : null}
+                                  {junketBadgeSuffix(j) ? <span>{junketBadgeSuffix(j)}</span> : null}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : null}
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap">
+                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">
                         {g.agent_name ? (
                           <span className="font-medium text-slate-200">{g.agent_name}</span>
                         ) : (
                           <span className="text-slate-500 text-[14px] italic">Unassigned</span>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap font-mono-num text-slate-400">
+                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap font-mono-num text-slate-400">
                         {g.telegram_id ?? '—'}
                       </td>
-                      <td className="py-2.5 px-3">
+                      <td className="hidden md:table-cell py-2.5 px-3">
                         {(g.junkets || []).length === 0 ? (
                           <span className="text-slate-500 text-[14px] italic">—</span>
                         ) : (
@@ -621,7 +776,7 @@ export default function GuestsPage() {
                           </div>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap">
+                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">
                         <span
                           className={`text-[13px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm border ${
                             g.active
@@ -632,8 +787,8 @@ export default function GuestsPage() {
                           {g.active ? 'Active' : 'Deactivated'}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1.5">
+                      <td className="py-2 md:py-2.5 px-2.5 md:px-3 text-right whitespace-nowrap align-top md:align-middle" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1 md:gap-1.5">
                           <button
                             type="button"
                             onClick={() => openEdit(g)}
@@ -677,7 +832,7 @@ export default function GuestsPage() {
       </div>
 
       {filteredGuests.length > 0 ? (
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-center sm:justify-end gap-3">
           <button
             type="button"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -820,7 +975,7 @@ export default function GuestsPage() {
                       return (
                         <div
                           key={j.junket}
-                          className={`inline-flex items-center gap-1 text-[13px] px-2 py-1 rounded border font-mono-num ${badgeClass}`}
+                          className={`inline-flex flex-wrap items-center gap-1 text-[13px] px-2 py-1 rounded border font-mono-num ${badgeClass}`}
                         >
                           <span className="font-bold uppercase tracking-wider">{j.junket}</span>
                           <span className="text-[10px] opacity-70">Rolling</span>
@@ -894,7 +1049,7 @@ export default function GuestsPage() {
                             commission_percent: j.commission_percent,
                           })
                         }
-                        className={`inline-flex items-center gap-1 text-[13px] px-2 py-1 rounded border font-mono-num cursor-pointer transition hover:brightness-125 hover:ring-1 hover:ring-white/30 ${badgeClass}`}
+                        className={`inline-flex flex-wrap items-center gap-x-1 text-left text-[13px] px-2 py-1 rounded border font-mono-num whitespace-nowrap cursor-pointer transition hover:brightness-125 hover:ring-1 hover:ring-white/30 ${badgeClass}`}
                       >
                         <span className="font-bold uppercase tracking-wider">{j.junket}</span>
                         {j.account_no ? <span>· {j.account_no}</span> : null}
@@ -922,19 +1077,13 @@ export default function GuestsPage() {
                     </button>
                   ) : null}
                   {recordJunkets.length > 1 ? (
-                    <select
+                    <Select
                       value={recordsJunketFilter}
-                      onChange={(e) => setRecordsJunketFilter(e.target.value)}
+                      onChange={setRecordsJunketFilter}
+                      options={[{ value: '', label: 'All junkets' }, ...recordJunkets]}
                       aria-label="Filter game records by junket"
-                      className="bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[13px] text-slate-300 focus:outline-hidden cursor-pointer"
-                    >
-                      <option value="">All junkets</option>
-                      {recordJunkets.map((j) => (
-                        <option key={j.value} value={j.value}>
-                          {j.label}
-                        </option>
-                      ))}
-                    </select>
+                      className="min-w-[120px] bg-slate-950 border border-slate-800 rounded-md px-2 py-1 text-[13px] text-slate-300 focus:outline-hidden focus:border-blue-500"
+                    />
                   ) : null}
                 </div>
               </div>
@@ -953,108 +1102,14 @@ export default function GuestsPage() {
                   </p>
                 </div>
               ) : (
-                <div className="rounded-lg border border-slate-800 overflow-auto max-h-[28rem]">
-                  <table className="w-full text-left text-[13px] border-collapse">
-                    <thead className="sticky top-0">
-                      <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 text-[11px] font-bold">
-                        <th className="py-2 px-2.5 whitespace-nowrap">DATE</th>
-                        <th className="py-2 px-2.5 whitespace-nowrap">JUNKET</th>
-                        <th className="py-2 px-2.5 whitespace-nowrap">ACCOUNT NO.</th>
-                        <th className="py-2 px-2.5">GUEST</th>
-                        <th className="py-2 px-2.5 text-right whitespace-nowrap">BUY-IN</th>
-                        <th className="py-2 px-2.5 text-right whitespace-nowrap">CASHOUT</th>
-                        <th className="py-2 px-2.5 text-right whitespace-nowrap">ROLLING</th>
-                        <th className="py-2 px-2.5 text-right whitespace-nowrap">RATE</th>
-                        <th className="py-2 px-2.5 text-right whitespace-nowrap">COMMISSION</th>
-                        <th className="py-2 px-2.5 text-right whitespace-nowrap">WIN/LOSS</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 bg-slate-900">
-                      {visibleRecords.map((r) => {
-                        const eff = effectiveRow(r);
-                        return (
-                        <tr key={r.id} className="hover:bg-slate-800/40 transition">
-                          <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-400">
-                            {formatWhen(r.created_at)}
-                          </td>
-                          <td className="py-2 px-2.5 whitespace-nowrap">
-                            {(() => {
-                              const meta = JUNKETS.find((jj) => jj.value === r.junket);
-                              return (
-                                <span
-                                  className={`inline-block uppercase font-bold text-[11px] px-1.5 py-0.5 rounded border ${
-                                    meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
-                                  }`}
-                                >
-                                  {r.junket}
-                                </span>
-                              );
-                            })()}
-                          </td>
-                          <td className="py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-300">
-                            {r.account_no || '—'}
-                          </td>
-                          <td
-                            className="py-2 px-2.5 text-slate-200 truncate max-w-[180px]"
-                            title={r.player_name || ''}
-                          >
-                            {r.player_name || '—'}
-                          </td>
-                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
-                            {formatAmount(r.buy_in)}
-                          </td>
-                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-200">
-                            {formatAmount(r.cashout)}
-                          </td>
-                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100">
-                            {formatAmount(eff.rolling)}
-                          </td>
-                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-slate-100 font-mono-num">
-                            {formatRate(customRate(r))}
-                          </td>
-                          <td className="py-2 px-2.5 text-right whitespace-nowrap font-bold text-amber-400">
-                            {formatAmount(eff.commission)}
-                          </td>
-                          <td
-                            className={`py-2 px-2.5 text-right whitespace-nowrap font-bold ${
-                              Number(r.win_loss) >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                            }`}
-                          >
-                            {formatAmount(r.win_loss)}
-                          </td>
-                        </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot className="sticky bottom-0">
-                      <tr className="border-t border-slate-700 bg-slate-950 font-bold">
-                        <td className="py-2 px-2.5 whitespace-nowrap text-slate-400" colSpan={4}>
-                          GRAND TOTAL
-                        </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
-                          {formatAmount(recordsTotals.buy_in)}
-                        </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
-                          {formatAmount(recordsTotals.cashout)}
-                        </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">
-                          {formatAmount(recordsTotals.rolling)}
-                        </td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100 font-mono-num"></td>
-                        <td className="py-2 px-2.5 text-right whitespace-nowrap text-amber-400">
-                          {formatAmount(recordsTotals.commission)}
-                        </td>
-                        <td
-                          className={`py-2 px-2.5 text-right whitespace-nowrap ${
-                            recordsTotals.win_loss >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                          }`}
-                        >
-                          {formatAmount(recordsTotals.win_loss)}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                <RecordsTable
+                  records={visibleRecords}
+                  rolling={(r) => effectiveRow(r).rolling}
+                  rate={customRate}
+                  rateLabel="RATE"
+                  commission={(r) => effectiveRow(r).commission}
+                  totals={recordsTotals}
+                />
               )}
             </div>
 
@@ -1085,104 +1140,18 @@ export default function GuestsPage() {
               <p className="text-slate-500 text-sm">No game records to compute.</p>
             </div>
           ) : (
-            <div className="rounded-lg border border-slate-800 overflow-auto max-h-[28rem]">
-              <table className="w-full text-left text-[13px] border-collapse">
-                <thead className="sticky top-0">
-                  <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 text-[11px] font-bold">
-                    <th className="py-2 px-1.5 whitespace-nowrap">DATE</th>
-                    <th className="py-2 px-1.5 whitespace-nowrap">JUNKET</th>
-                    <th className="py-2 px-1.5 whitespace-nowrap">ACCOUNT NO.</th>
-                    <th className="py-2 px-1.5">GUEST</th>
-                    <th className="py-2 px-1.5 text-right whitespace-nowrap">BUY-IN</th>
-                    <th className="py-2 px-1.5 text-right whitespace-nowrap">CASHOUT</th>
-                    <th className="py-2 px-1.5 text-right whitespace-nowrap">ROLLING</th>
-                    <th className="py-2 px-1.5 text-right whitespace-nowrap">GAME RATE</th>
-                    <th className="py-2 px-1.5 text-right whitespace-nowrap">COMMISSION</th>
-                    <th className="py-2 px-1.5 text-right whitespace-nowrap">WIN/LOSS</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 bg-slate-900">
-                  {visibleRecords.map((r) => {
-                    return (
-                      <tr key={r.id} className="hover:bg-slate-800/40 transition">
-                        <td className="py-2 px-1.5 whitespace-nowrap font-mono-num text-slate-400">
-                          {formatWhen(r.created_at)}
-                        </td>
-                        <td className="py-2 px-1.5 whitespace-nowrap">
-                          {(() => {
-                            const meta = JUNKETS.find((jj) => jj.value === r.junket);
-                            return (
-                              <span
-                                className={`inline-block uppercase font-bold text-[11px] px-1.5 py-0.5 rounded border ${
-                                  meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'
-                                }`}
-                              >
-                                {r.junket}
-                              </span>
-                            );
-                          })()}
-                        </td>
-                        <td className="py-2 px-1.5 whitespace-nowrap font-mono-num text-slate-300">
-                          {r.account_no || '—'}
-                        </td>
-                        <td className="py-2 px-1.5 text-slate-200 truncate max-w-[180px]" title={r.player_name || ''}>
-                          {r.player_name || '—'}
-                        </td>
-                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-slate-200">
-                          {formatAmount(r.buy_in)}
-                        </td>
-                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-slate-200">
-                          {formatAmount(r.cashout)}
-                        </td>
-                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-slate-100">
-                          {formatAmount(r.rolling)}
-                        </td>
-                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-slate-100 font-mono-num">
-                          {formatRate(r.game_rate)}
-                        </td>
-                        <td className="py-2 px-1.5 text-right whitespace-nowrap font-bold text-amber-400">
-                          {formatAmount(r.original_commission)}
-                        </td>
-                        <td
-                          className={`py-2 px-1.5 text-right whitespace-nowrap font-bold ${
-                            Number(r.win_loss) >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                          }`}
-                        >
-                          {formatAmount(r.win_loss)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot className="sticky bottom-0">
-                  <tr className="border-t border-slate-700 bg-slate-950 font-bold">
-                    <td className="py-2 px-1.5 whitespace-nowrap text-slate-400" colSpan={4}>
-                      GRAND TOTAL
-                    </td>
-                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-slate-100">
-                      {formatAmount(recordsTotals.buy_in)}
-                    </td>
-                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-slate-100">
-                      {formatAmount(recordsTotals.cashout)}
-                    </td>
-                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-slate-100">
-                      {formatAmount(originalTotals.rolling)}
-                    </td>
-                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-slate-100 font-mono-num"></td>
-                    <td className="py-2 px-1.5 text-right whitespace-nowrap text-amber-400">
-                      {originalTotals.hasOriginal ? formatAmount(originalTotals.commission) : '—'}
-                    </td>
-                    <td
-                      className={`py-2 px-1.5 text-right whitespace-nowrap ${
-                        recordsTotals.win_loss >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                      }`}
-                    >
-                      {formatAmount(recordsTotals.win_loss)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+            <RecordsTable
+              records={visibleRecords}
+              rolling={(r) => r.rolling}
+              rate={(r) => r.game_rate}
+              rateLabel="GAME RATE"
+              commission={(r) => r.original_commission}
+              totals={{
+                ...recordsTotals,
+                rolling: originalTotals.rolling,
+                commission: originalTotals.hasOriginal ? originalTotals.commission : null,
+              }}
+            />
           )}
 
           <div className="flex items-center justify-end pt-2 border-t border-slate-800">

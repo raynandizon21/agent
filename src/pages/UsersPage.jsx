@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useAuth } from '../AuthContext';
 import ConfirmDialog from '../ConfirmDialog';
 import Modal from '../components/common/Modal';
+import Select from '../components/common/Select';
 
 const EMPTY_FORM = { username: '', password: '', agent_id: '' };
 const PAGE_SIZE = 20;
@@ -183,7 +184,7 @@ export default function UsersPage() {
               <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 text-[14px] font-bold">
                 <th className="py-2.5 px-3 whitespace-nowrap">USERNAME</th>
                 <th className="py-2.5 px-3 whitespace-nowrap">SCOPE</th>
-                <th className="py-2.5 px-3 whitespace-nowrap">CREATED</th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">CREATED</th>
                 <th className="py-2.5 px-3 text-right whitespace-nowrap">ACTIONS</th>
               </tr>
             </thead>
@@ -203,7 +204,7 @@ export default function UsersPage() {
                         {u.username}
                         {u.id === me?.id ? <span className="text-slate-500"> (you)</span> : null}
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap">
+                      <td className="py-2.5 px-3 md:whitespace-nowrap">
                         {u.agent_id ? (
                           <span className="inline-flex items-center gap-1 text-[13px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border bg-blue-500/15 text-blue-300 border-blue-500/30">
                             {u.agent_name}
@@ -214,7 +215,7 @@ export default function UsersPage() {
                           </span>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 whitespace-nowrap font-mono-num text-slate-400 text-[14px]">
+                      <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap font-mono-num text-slate-400 text-[14px]">
                         {new Date(u.created_at).toLocaleString()}
                       </td>
                       <td className="py-2.5 px-3 text-right whitespace-nowrap">
@@ -249,7 +250,7 @@ export default function UsersPage() {
       </div>
 
       {filteredUsers.length > 0 ? (
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-center sm:justify-end gap-3">
           <button
             type="button"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -314,18 +315,15 @@ export default function UsersPage() {
 
           <div>
             <label className="text-slate-400 font-semibold block mb-1 text-[13px] uppercase">Scope to agent</label>
-            <select
+            <Select
               value={form.agent_id}
-              onChange={(e) => setForm((f) => ({ ...f, agent_id: e.target.value }))}
+              onChange={(agentId) => setForm((f) => ({ ...f, agent_id: agentId }))}
+              options={[
+                { value: '', label: '— Admin (sees everything) —' },
+                ...agents.map((a) => ({ value: String(a.id), label: a.name })),
+              ]}
               className={inputClass}
-            >
-              <option value="">— Admin (sees everything) —</option>
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">

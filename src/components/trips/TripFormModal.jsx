@@ -2,6 +2,7 @@ import { Loader2, Plane } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../../api';
 import Modal from '../common/Modal';
+import Select from '../common/Select';
 import { JUNKET_BADGE, JUNKET_LABELS, todayStr } from '../../lib/trips';
 
 const EMPTY = {
@@ -90,15 +91,18 @@ export default function TripFormModal({ open, trip, onClose, onSaved }) {
         <section className="space-y-3">
           <div>
             <label className={labelCls}>1. Guest name</label>
-            <select className={inputCls} value={form.guest_id} onChange={(e) => set('guest_id', e.target.value)}>
-              <option value="">Select a guest…</option>
-              {guests.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.guest_name}
-                  {g.guest_code ? ` (${g.guest_code})` : ''}
-                </option>
-              ))}
-            </select>
+            <Select
+              className={inputCls}
+              value={form.guest_id}
+              onChange={(guestId) => set('guest_id', guestId)}
+              options={[
+                { value: '', label: 'Select a guest…' },
+                ...guests.map((g) => ({
+                  value: String(g.id),
+                  label: `${g.guest_name}${g.guest_code ? ` (${g.guest_code})` : ''}`,
+                })),
+              ]}
+            />
             <p className="text-xs text-slate-500 mt-1">New guest? Add them on the Guests page first.</p>
           </div>
 

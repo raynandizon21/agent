@@ -2,7 +2,7 @@ import { Bot, LogOut } from 'lucide-react';
 
 export default function Navbar({ username, agentName, isAdmin, onLogout }) {
   return (
-    <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-6 py-2.5">
+    <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-6 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
       <div className="w-full flex items-center justify-between gap-3">
         {/* Brand */}
         <div className="flex items-center gap-2.5 min-w-0">
@@ -22,6 +22,11 @@ export default function Navbar({ username, agentName, isAdmin, onLogout }) {
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {!isAdmin ? (
+            <span className="sm:hidden max-w-[96px] truncate px-1.5 py-0.5 rounded-md text-[12px] font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20">
+              {agentName || username}
+            </span>
+          ) : null}
           <span className="hidden sm:inline text-sm font-medium text-slate-300">
             {username}
             {!isAdmin ? (
@@ -33,11 +38,12 @@ export default function Navbar({ username, agentName, isAdmin, onLogout }) {
 
           <button
             onClick={onLogout}
-            className="px-2.5 sm:px-3 py-1.5 text-sm font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-lg transition flex items-center gap-1.5 cursor-pointer active:scale-95"
+            aria-label="Log out"
+            className="p-2 sm:px-3 sm:py-1.5 text-sm font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 rounded-lg transition flex items-center gap-1.5 cursor-pointer active:scale-95"
             title="Log out"
           >
             <LogOut className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <span>Log out</span>
+            <span className="hidden sm:inline">Log out</span>
           </button>
         </div>
       </div>

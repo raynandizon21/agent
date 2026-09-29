@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import ConfirmDialog from '../ConfirmDialog';
+import Select from '../components/common/Select';
 import TripFormModal from '../components/trips/TripFormModal';
 import { effectiveCommission, effectiveRate } from '../lib/commission';
 import {
@@ -45,6 +46,7 @@ const TABS = [
 ];
 
 const CURRENCIES = ['PHP', 'KRW', 'USD', 'CNY', 'HKD', 'JPY', 'SGD', 'TWD', 'THB', 'VND'];
+const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c, label: c }));
 
 const inputCls =
   'w-full bg-slate-950 border border-slate-800 focus:border-blue-500/60 rounded-lg px-3 py-2.5 text-base sm:text-sm text-slate-100 outline-none placeholder:text-slate-500';
@@ -335,16 +337,12 @@ function ExchangeTab({ tripId, exchanges, onChanged }) {
         <form onSubmit={submit} className="bg-slate-900/70 border border-slate-800 rounded-xl p-3 space-y-2.5">
           <input type="datetime-local" className={inputCls} value={form.exchange_dt} onChange={(e) => set('exchange_dt', e.target.value)} />
           <div className="grid grid-cols-[88px_1fr] gap-2">
-            <select className={inputCls} value={form.from_currency} onChange={(e) => set('from_currency', e.target.value)}>
-              {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
-            </select>
+            <Select className={inputCls} value={form.from_currency} onChange={(c) => set('from_currency', c)} options={CURRENCY_OPTIONS} />
             <input inputMode="decimal" className={`${inputCls} font-mono-num`} placeholder="Give amount" value={form.from_amount} onChange={(e) => set('from_amount', e.target.value)} />
           </div>
           <input inputMode="decimal" className={`${inputCls} font-mono-num`} placeholder={`Rate (1 ${form.from_currency} = ? ${form.to_currency})`} value={form.rate} onChange={(e) => set('rate', e.target.value)} />
           <div className="grid grid-cols-[88px_1fr] gap-2">
-            <select className={inputCls} value={form.to_currency} onChange={(e) => set('to_currency', e.target.value)}>
-              {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
-            </select>
+            <Select className={inputCls} value={form.to_currency} onChange={(c) => set('to_currency', c)} options={CURRENCY_OPTIONS} />
             <input inputMode="decimal" className={`${inputCls} font-mono-num`} placeholder="Receive amount" value={form.to_amount} onChange={(e) => set('to_amount', e.target.value)} />
           </div>
           <input className={inputCls} placeholder="Notes (optional)" value={form.notes} onChange={(e) => set('notes', e.target.value)} />

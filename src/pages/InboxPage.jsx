@@ -103,14 +103,14 @@ export default function InboxPage() {
           </p>
         </div>
 
-        <form className="flex flex-wrap items-center gap-1.5" onSubmit={onSearch}>
-          <div className="relative">
+        <form className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto" onSubmit={onSearch}>
+          <div className="relative flex-1 basis-full sm:basis-auto">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
               placeholder="Search text, agent, username, chat id…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-md pl-8 pr-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-blue-500 min-w-[220px]"
+              className="bg-slate-950 border border-slate-800 rounded-md pl-8 pr-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-blue-500 w-full sm:min-w-[220px]"
             />
           </div>
           <button
@@ -200,7 +200,7 @@ export default function InboxPage() {
       )}
 
       {messages.length > 0 ? (
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-center sm:justify-end gap-3">
           <button
             type="button"
             onClick={() => setPage((p) => Math.max(1, p - 1))}

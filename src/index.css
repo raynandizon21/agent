@@ -1,6 +1,12 @@
 @import "tailwindcss";
 
 @layer base {
+  html,
+  body {
+    /* A stray wide element must never make the whole page side-scroll on a phone. */
+    overflow-x: clip;
+  }
+
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     letter-spacing: -0.01em;
