@@ -510,7 +510,7 @@ function AnalysisTab({ trip, days, games, totals, byDay, exchanges }) {
                 <tr>
                   <th className="text-left font-semibold px-1 py-1">Junket</th>
                   <th className="text-right font-semibold px-1 py-1">Games</th>
-                  <th className="text-right font-semibold px-1 py-1">W/L</th>
+                  <th className="text-right font-semibold px-1 py-1">Win/Loss</th>
                   <th className="text-right font-semibold px-1 py-1">Rolling</th>
                   <th className="text-right font-semibold px-1 py-1">Com</th>
                 </tr>

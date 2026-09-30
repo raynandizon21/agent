@@ -1,23 +1,42 @@
-import { Bot } from 'lucide-react';
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 
+const REMEMBER_KEY = 'login.rememberedUsername';
+
+function readRemembered() {
+  try {
+    return localStorage.getItem(REMEMBER_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export default function LoginPage() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState('admin');
+  const remembered = readRemembered();
+  const [username, setUsername] = useState(remembered ?? 'admin');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(remembered !== null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
 
   if (user) return <Navigate to="/" replace />;
 
   async function doLogin(user, pass) {
     setError('');
+    setNotice('');
     setBusy(true);
     try {
       await login(user.trim(), pass);
+      try {
+        if (remember) localStorage.setItem(REMEMBER_KEY, user.trim());
+        else localStorage.removeItem(REMEMBER_KEY);
+      } catch {
+        // storage unavailable — ignore
+      }
       navigate('/', { replace: true });
     } catch (err) {
       setError(err.message || 'Login failed');
@@ -31,71 +50,89 @@ export default function LoginPage() {
     doLogin(username, password);
   }
 
+  const inputClass =
+    'w-full bg-[#e8f0fe] border border-slate-600/60 rounded-xl text-slate-900 text-[15px] px-4 py-3 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition';
+  const labelClass = 'block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2';
+
   return (
-    <div className="min-h-screen grid place-items-center bg-slate-950 p-6">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-[420px] bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl space-y-4"
-      >
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold shrink-0">
-            <Bot className="w-4 h-4" />
+    <div className="min-h-screen grid place-items-center bg-[#0f172a] p-6">
+      <form onSubmit={onSubmit} className="w-full max-w-[400px]">
+        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-400">Agent Inbox</p>
+        <h1 className="text-[32px] font-extrabold text-white tracking-tight leading-tight mt-2">Welcome Back</h1>
+        <p className="text-[15px] text-slate-400 mt-1">Please enter your details to sign in</p>
+
+        <div className="mt-7 space-y-5">
+          <div>
+            <label htmlFor="login-username" className={labelClass}>Username</label>
+            <input
+              id="login-username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+              className={inputClass}
+            />
           </div>
-          <p className="text-[14px] font-bold uppercase tracking-widest text-blue-400">Agent Inbox</p>
+
+          <div>
+            <label htmlFor="login-password" className={labelClass}>Password</label>
+            <input
+              id="login-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+              className={inputClass}
+            />
+          </div>
         </div>
 
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Sign in</h1>
-          <p className="text-sm text-slate-400 mt-1">Staff access to Telegram message logs</p>
+        <div className="flex items-center justify-between mt-5">
+          <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="w-4 h-4 accent-blue-600 cursor-pointer"
+            />
+            Remember me
+          </label>
+          <button
+            type="button"
+            onClick={() => setNotice('Please contact your administrator to reset your password.')}
+            className="text-sm font-bold text-indigo-400 hover:text-indigo-300 transition cursor-pointer"
+          >
+            Forgot password?
+          </button>
         </div>
 
-        <label className="flex flex-col gap-1.5 text-sm font-medium text-slate-300">
-          Username
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            required
-            className="bg-slate-950 border border-slate-800 rounded-lg text-slate-100 px-3 py-2.5 focus:outline-hidden focus:border-blue-500 transition"
-          />
-        </label>
-
-        <label className="flex flex-col gap-1.5 text-sm font-medium text-slate-300">
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-            className="bg-slate-950 border border-slate-800 rounded-lg text-slate-100 px-3 py-2.5 focus:outline-hidden focus:border-blue-500 transition"
-          />
-        </label>
-
-        {error ? <p className="text-rose-400 text-sm">{error}</p> : null}
+        {error ? <p className="text-rose-400 text-sm mt-4">{error}</p> : null}
+        {notice ? <p className="text-slate-300 text-sm mt-4">{notice}</p> : null}
 
         <button
           type="submit"
           disabled={busy}
-          className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+          className="w-full mt-6 py-3.5 bg-[#4f39f6] hover:bg-[#5b47f7] text-white rounded-xl text-[15px] font-bold shadow-lg shadow-indigo-600/30 transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
         >
-          {busy ? 'Signing in…' : 'Sign in'}
+          {busy ? 'Signing in…' : 'Sign In'}
         </button>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex justify-center gap-4 border-t border-slate-800 mt-10 pt-6 text-xs text-slate-500">
           <button
             type="button"
             disabled={busy}
             onClick={() => doLogin('admin', '123')}
-            className="w-full py-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-medium transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+            className="hover:text-slate-300 transition cursor-pointer disabled:opacity-55"
           >
             Quick log in (Admin)
           </button>
+          <span>·</span>
           <button
             type="button"
             disabled={busy}
             onClick={() => doLogin('raynan', '12348765')}
-            className="w-full py-2.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-medium transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
+            className="hover:text-slate-300 transition cursor-pointer disabled:opacity-55"
           >
             Quick log in (Agent)
           </button>

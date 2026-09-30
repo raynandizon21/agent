@@ -356,7 +356,7 @@ export default function StatementsPage() {
                           <li className="px-2.5 py-1.5 flex justify-between text-[10px] uppercase font-semibold text-slate-500">
                             <span>Game</span>
                             <span>
-                              Roll · <span className="text-amber-400/80">Com</span> · W/L
+                              Roll · <span className="text-amber-400/80">Com</span> · Win/Loss
                             </span>
                           </li>
                           {rows.map((r) => (
@@ -388,7 +388,7 @@ export default function StatementsPage() {
                                 <th className="py-2 px-2.5 text-right">Rolling</th>
                                 <th className="py-2 px-2.5 text-right">Rate</th>
                                 <th className="py-2 px-2.5 text-right">Commission</th>
-                                <th className="py-2 px-2.5 text-right">W/L</th>
+                                <th className="py-2 px-2.5 text-right">Win/Loss</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/60 font-mono-num">

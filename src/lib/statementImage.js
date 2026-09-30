@@ -155,7 +155,7 @@ function layout(ctx, data, draw) {
         text(ctx, 'DATE / ACCOUNT', PAD + 14, y + 19, hf);
         text(ctx, 'ROLLING', xR, y + 19, { ...hf, align: 'right' });
         text(ctx, 'COMMISSION', xC, y + 19, { ...hf, align: 'right' });
-        text(ctx, 'W/L', xW, y + 19, { ...hf, align: 'right' });
+        text(ctx, 'WIN/LOSS', xW, y + 19, { ...hf, align: 'right' });
       }
       let ry = y + headH;
       rows.forEach((r) => {
@@ -262,7 +262,7 @@ function recordsLayout(ctx, data, draw) {
     text(ctx, 'ROLLING', xRoll, hy, { ...hf, align: 'right' });
     text(ctx, 'RATE', xRate, hy, { ...hf, align: 'right' });
     text(ctx, 'COMMISSION', xCom, hy, { ...hf, align: 'right' });
-    text(ctx, 'W/L', xWL, hy, { ...hf, align: 'right' });
+    text(ctx, 'WIN/LOSS', xWL, hy, { ...hf, align: 'right' });
   }
 
   let ry = y + headH;

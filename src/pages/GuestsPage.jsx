@@ -7,11 +7,12 @@ import {
   Plus,
   Power,
   Search,
+  Settings,
   Trash2,
   Users,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { useAuth } from '../AuthContext';
 import ConfirmDialog from '../ConfirmDialog';
@@ -26,6 +27,118 @@ function formatAmount(value) {
   const n = Number(value);
   if (Number.isNaN(n)) return String(value);
   return n.toLocaleString();
+}
+
+// Single settings button that opens Edit / Activate-Deactivate / Delete —
+// replaces the old row of three icon buttons so the guest modal stays tidy
+// on phones.
+// The menu is position:fixed (anchored to the button's rect) so it isn't
+// clipped by the desktop table's overflow container.
+const MENU_HEIGHT = 140;
+
+function GuestActionsMenu({ active, busy, onEdit, onToggle, onDelete }) {
+  const [pos, setPos] = useState(null);
+  const ref = useRef(null);
+  const btnRef = useRef(null);
+  const open = pos !== null;
+
+  function toggle() {
+    if (open) {
+      setPos(null);
+      return;
+    }
+    const r = btnRef.current.getBoundingClientRect();
+    const right = window.innerWidth - r.right;
+    const flipUp = r.bottom + MENU_HEIGHT + 8 > window.innerHeight;
+    setPos(flipUp ? { right, bottom: window.innerHeight - r.top + 6 } : { right, top: r.bottom + 6 });
+  }
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = () => setPos(null);
+    function onDown(e) {
+      if (ref.current && !ref.current.contains(e.target)) close();
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') close();
+    }
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  const item =
+    'w-full flex items-center gap-2.5 px-3 py-2.5 text-[13px] text-left transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed';
+
+  return (
+    <div ref={ref} className="relative inline-block" onClick={(e) => e.stopPropagation()}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        title="Guest settings"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`p-1.5 rounded-md transition cursor-pointer ${
+          open ? 'text-white bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+        }`}
+      >
+        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings className="w-4 h-4" />}
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          style={pos}
+          className="fixed z-[60] w-48 overflow-hidden rounded-lg bg-slate-900 border border-slate-700 shadow-xl"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setPos(null);
+              onEdit();
+            }}
+            className={`${item} text-slate-200 hover:bg-slate-800`}
+          >
+            <Edit2 className="w-4 h-4 text-slate-400" />
+            Edit guest
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy}
+            onClick={() => {
+              setPos(null);
+              onToggle();
+            }}
+            className={`${item} text-slate-200 hover:bg-slate-800`}
+          >
+            <Power className={`w-4 h-4 ${active ? 'text-emerald-400' : 'text-slate-500'}`} />
+            {active ? 'Deactivate' : 'Activate'}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setPos(null);
+              onDelete();
+            }}
+            className={`${item} text-rose-400 hover:bg-rose-500/10 border-t border-slate-800`}
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function formatRate(value) {
@@ -70,16 +183,6 @@ function formatSignedCompact(value) {
   return `${n > 0 ? '+' : ''}${formatCompact(n)}`;
 }
 
-// "3d ago" / "Today" — last-played recency for guest rows.
-function formatAgo(value) {
-  if (!value) return 'Never played';
-  const days = Math.floor((Date.now() - new Date(value).getTime()) / 86400000);
-  if (days <= 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  if (days < 30) return `${days}d ago`;
-  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
 function initials(name) {
   return (name || '?')
     .split(/\s+/)
@@ -91,18 +194,26 @@ function initials(name) {
 
 const EMPTY_STATS = { games: 0, buy_in: 0, cashout: 0, rolling: 0, commission: 0, win_loss: 0, last_played: null };
 
+// Full "INFINITY · INF555 · 100% rolling · 1.2% com" text — the chip's tooltip.
+function junketChipLabel(j) {
+  return [j.junket, j.account_no ? `· ${j.account_no}` : null, junketBadgeSuffix(j)].filter(Boolean).join(' ');
+}
+
+// Single-line chip: truncates with "…" when space runs out; the tooltip
+// carries the full text.
 function JunketChip({ j, size = 'sm' }) {
   const meta = JUNKETS.find((jj) => jj.value === j.junket);
   const suffix = junketBadgeSuffix(j);
   return (
     <span
-      className={`inline-flex flex-wrap items-center gap-x-1 rounded border font-mono-num ${
+      title={junketChipLabel(j)}
+      className={`min-w-0 max-w-full truncate whitespace-nowrap rounded border font-mono-num ${
         size === 'xs' ? 'text-[10px] px-1 py-px' : 'text-[12px] px-1.5 py-0.5'
       } ${meta ? meta.color : 'bg-slate-800 text-slate-300 border-slate-700'}`}
     >
       <span className="font-bold uppercase tracking-wide">{j.junket}</span>
-      {j.account_no ? <span>· {j.account_no}</span> : null}
-      {suffix ? <span className="opacity-80">{suffix}</span> : null}
+      {j.account_no ? <span> · {j.account_no}</span> : null}
+      {suffix ? <span className="opacity-80"> {suffix}</span> : null}
     </span>
   );
 }
@@ -254,13 +365,12 @@ function RecordsTable({ records, rolling, rate, rateLabel, commission, totals })
       <table className="w-full text-left text-[11px] md:text-[13px] border-collapse">
         <thead className="sticky top-0">
           <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 text-[10px] md:text-[11px] font-bold">
-            <th className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap">DATE</th>
+            <th className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap">GAME START</th>
             <th className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap">JUNKET</th>
             <th className="py-2 px-2 md:px-2.5 whitespace-nowrap">
               <span className="md:hidden">ACCOUNT</span>
-              <span className="hidden md:inline">ACCOUNT NO.</span>
+              <span className="hidden md:inline">ACCOUNT / GUEST</span>
             </th>
-            <th className="hidden md:table-cell py-2 px-2.5">GUEST</th>
             <th className="md:hidden py-2 px-1 text-right whitespace-nowrap">IN / OUT</th>
             <th className="md:hidden py-2 px-1 text-right whitespace-nowrap">ROLL / COM</th>
             <th className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap">BUY-IN</th>
@@ -268,7 +378,8 @@ function RecordsTable({ records, rolling, rate, rateLabel, commission, totals })
             <th className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap">ROLLING</th>
             <th className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap">{rateLabel}</th>
             <th className="hidden md:table-cell py-2 px-2.5 text-right whitespace-nowrap">COMMISSION</th>
-            <th className="py-2 px-2 md:px-2.5 text-right whitespace-nowrap">W/L</th>
+            <th className="py-2 px-2 md:px-2.5 text-right whitespace-nowrap">WIN/LOSS</th>
+            <th className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap">GAME END</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800/60 bg-slate-900">
@@ -278,28 +389,35 @@ function RecordsTable({ records, rolling, rate, rateLabel, commission, totals })
             return (
               <tr key={r.id} className="hover:bg-slate-800/40 transition">
                 <td className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-400">
-                  {formatWhen(r.created_at)}
+                  {formatWhen(r.game_start || r.settled_at || r.created_at)}
                 </td>
                 <td className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap">
                   <span className={`inline-block uppercase font-bold text-[11px] px-1.5 py-0.5 rounded border ${badge}`}>
                     {r.junket}
                   </span>
                 </td>
-                <td className="py-2 px-2 md:px-2.5 whitespace-nowrap font-mono-num text-slate-300 max-md:max-w-[120px]">
-                  <div className="flex items-center gap-1">
-                    <span className="max-md:font-bold max-md:text-slate-100">{r.account_no || '—'}</span>
+                <td className="py-2 px-2 md:px-2.5 whitespace-nowrap font-mono-num text-slate-300 max-md:max-w-[140px] md:max-w-[280px]">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span
+                      className="min-w-0 truncate"
+                      title={`${r.account_no || '—'}${r.player_name ? ` (${r.player_name})` : ''}`}
+                    >
+                      <span className="font-bold text-slate-100">{r.account_no || '—'}</span>
+                      {r.player_name ? <span className="font-sans text-slate-300"> ({r.player_name})</span> : null}
+                    </span>
                     <span className={`md:hidden uppercase font-bold text-[8px] px-1 rounded-sm border ${badge}`}>
                       {r.junket}
                     </span>
                   </div>
-                  <div className="md:hidden text-slate-400 font-sans truncate">{r.player_name || '—'}</div>
+                  {r.guest ? (
+                    <div className="text-[10px] md:text-[11px] font-sans text-sky-300/80 truncate" title={`Guest: ${r.guest}`}>
+                      <span className="text-slate-500">Guest:</span> {r.guest}
+                    </div>
+                  ) : null}
                   <div className="md:hidden text-[10px] text-slate-500">
-                    {formatWhen(r.created_at)}
+                    {formatWhen(r.game_start || r.settled_at || r.created_at)}
                     {rate(r) != null ? ` · ${formatRate(rate(r))}` : ''}
                   </div>
-                </td>
-                <td className="hidden md:table-cell py-2 px-2.5 text-slate-200 truncate max-w-[180px]" title={r.player_name || ''}>
-                  {r.player_name || '—'}
                 </td>
                 <td className="md:hidden py-2 px-1 text-right whitespace-nowrap font-mono-num leading-snug">
                   <div className="font-bold text-slate-200">{formatAmount(r.buy_in)}</div>
@@ -327,6 +445,9 @@ function RecordsTable({ records, rolling, rate, rateLabel, commission, totals })
                 <td className={`py-2 px-2 md:px-2.5 text-right whitespace-nowrap font-bold font-mono-num ${wlClass(r.win_loss)}`}>
                   {formatAmount(r.win_loss)}
                 </td>
+                <td className="hidden md:table-cell py-2 px-2.5 whitespace-nowrap font-mono-num text-slate-400">
+                  {formatWhen(r.settled_at)}
+                </td>
               </tr>
             );
           })}
@@ -347,7 +468,7 @@ function RecordsTable({ records, rolling, rate, rateLabel, commission, totals })
             </td>
           </tr>
           <tr className="hidden md:table-row border-t border-slate-700 bg-slate-950 font-bold">
-            <td className="py-2 px-2.5 whitespace-nowrap text-slate-400" colSpan={4}>
+            <td className="py-2 px-2.5 whitespace-nowrap text-slate-400" colSpan={3}>
               GRAND TOTAL
             </td>
             <td className="py-2 px-2.5 text-right whitespace-nowrap text-slate-100">{formatAmount(totals.buy_in)}</td>
@@ -358,6 +479,7 @@ function RecordsTable({ records, rolling, rate, rateLabel, commission, totals })
             <td className={`py-2 px-2.5 text-right whitespace-nowrap ${wlClass(totals.win_loss)}`}>
               {formatAmount(totals.win_loss)}
             </td>
+            <td className="py-2 px-2.5"></td>
           </tr>
         </tfoot>
       </table>
@@ -715,40 +837,16 @@ export default function GuestsPage() {
     [visibleRecords]
   );
 
-  const actionBtn =
-    'p-2 md:p-1.5 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-md transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed';
-
   // Plain render helper (not a component) so rows don't remount each render.
   function rowActions(g) {
-    const busyRow = rowBusy === g.id;
     return (
-      <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-        <button type="button" onClick={() => openEdit(g)} disabled={busyRow} title="Edit" className={actionBtn}>
-          <Edit2 className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => toggleActive(g)}
-          disabled={busyRow}
-          title={g.active ? 'Deactivate' : 'Activate'}
-          className={actionBtn}
-        >
-          {busyRow ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Power className={`w-3.5 h-3.5 ${g.active ? 'text-emerald-400' : 'text-slate-500'}`} />
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => setToDelete(g)}
-          disabled={busyRow}
-          title="Delete"
-          className="p-2 md:p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      <GuestActionsMenu
+        active={g.active}
+        busy={rowBusy === g.id}
+        onEdit={() => openEdit(g)}
+        onToggle={() => toggleActive(g)}
+        onDelete={() => setToDelete(g)}
+      />
     );
   }
 
@@ -781,7 +879,7 @@ export default function GuestsPage() {
           { label: 'Guests', value: `${kpis.active}/${filteredGuests.length}`, title: `${kpis.active} active of ${filteredGuests.length}` },
           { label: 'Rolling', value: formatCompact(kpis.rolling), title: formatAmount(kpis.rolling) },
           { label: 'Commission', value: formatCompact(kpis.commission), title: formatAmount(kpis.commission), tone: 'text-amber-400' },
-          { label: 'W/L', value: formatSignedCompact(kpis.win_loss), title: formatAmount(kpis.win_loss), tone: wlTone(kpis.win_loss) },
+          { label: 'Win/Loss', value: formatSignedCompact(kpis.win_loss), title: formatAmount(kpis.win_loss), tone: wlTone(kpis.win_loss) },
         ].map((k) => (
           <div key={k.label} title={k.title} className="bg-slate-900 px-2 py-1.5 sm:px-3 sm:py-2.5 min-w-0">
             <span className="text-[10px] sm:text-[12px] font-semibold uppercase tracking-wider block truncate text-slate-400">
@@ -853,29 +951,41 @@ export default function GuestsPage() {
                   <button
                     type="button"
                     onClick={() => openView(g)}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left active:bg-slate-800/60 transition cursor-pointer ${
+                    className={`w-full px-3 py-2.5 text-left active:bg-slate-800/60 transition cursor-pointer ${
                       g.active ? '' : 'opacity-50'
                     }`}
                   >
-                    <div className="w-9 h-9 rounded-full bg-blue-500/15 text-blue-300 grid place-items-center text-[12px] font-bold shrink-0">
-                      {initials(g.guest_name)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="font-semibold text-slate-100 truncate">{g.guest_name}</span>
-                        {g.guest_code ? (
-                          <span className="font-mono-num text-[11px] text-blue-400 font-bold shrink-0">{g.guest_code}</span>
-                        ) : null}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-blue-500/15 text-blue-300 grid place-items-center text-[11px] font-bold shrink-0">
+                        {initials(g.guest_name)}
                       </div>
-                      <div className="text-[12px] text-slate-500 truncate">
-                        {formatAgo(st.last_played)}
-                        {st.games ? ` · ${st.games} game${st.games === 1 ? '' : 's'}` : ''}
-                        {!g.active ? ' · Inactive' : ''}
-                      </div>
+                      <span className="font-semibold text-slate-100 truncate">{g.guest_name}</span>
+                      {g.guest_code ? (
+                        <span className="font-mono-num text-[11px] text-blue-400 font-bold shrink-0">{g.guest_code}</span>
+                      ) : null}
+                      {!g.active ? (
+                        <span className="ml-auto text-[10px] font-semibold uppercase text-rose-400 shrink-0">Inactive</span>
+                      ) : null}
                     </div>
-                    <div className="text-right font-mono-num shrink-0 leading-tight">
-                      <div className="text-[13px] font-bold text-amber-400">{formatCompact(st.commission)}</div>
-                      <div className={`text-[11px] ${wlTone(st.win_loss)}`}>{formatSignedCompact(st.win_loss)}</div>
+                    <div className="grid grid-cols-4 gap-2 mt-2 pl-[42px] font-mono-num leading-tight">
+                      <div className="min-w-0">
+                        <div className="text-[9px] font-sans font-semibold uppercase tracking-wide text-slate-500">Buy-in</div>
+                        <div className="text-[12px] font-bold text-slate-200 truncate">{formatCompact(st.buy_in)}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[9px] font-sans font-semibold uppercase tracking-wide text-slate-500">Rolling</div>
+                        <div className="text-[12px] font-bold text-slate-100 truncate">{formatCompact(st.rolling)}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[9px] font-sans font-semibold uppercase tracking-wide text-slate-500">Comm</div>
+                        <div className="text-[12px] font-bold text-amber-400 truncate">{formatCompact(st.commission)}</div>
+                      </div>
+                      <div className="min-w-0 text-right">
+                        <div className="text-[9px] font-sans font-semibold uppercase tracking-wide text-slate-500">Win/Loss</div>
+                        <div className={`text-[12px] font-bold truncate ${wlTone(st.win_loss)}`}>
+                          {formatSignedCompact(st.win_loss)}
+                        </div>
+                      </div>
                     </div>
                   </button>
                 </li>
@@ -892,10 +1002,10 @@ export default function GuestsPage() {
                     <th className="py-2.5 px-3 whitespace-nowrap">Guest</th>
                     {isAdmin ? <th className="py-2.5 px-3 whitespace-nowrap">Agent</th> : null}
                     <th className="py-2.5 px-3 whitespace-nowrap">Junkets</th>
+                    <th className="py-2.5 px-3 text-right whitespace-nowrap">Buy-in</th>
                     <th className="py-2.5 px-3 text-right whitespace-nowrap">Rolling</th>
                     <th className="py-2.5 px-3 text-right whitespace-nowrap">Commission</th>
-                    <th className="py-2.5 px-3 text-right whitespace-nowrap">W/L</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap">Last played</th>
+                    <th className="py-2.5 px-3 text-right whitespace-nowrap">Win/Loss</th>
                     <th className="py-2.5 px-3 text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
@@ -944,12 +1054,18 @@ export default function GuestsPage() {
                           {(g.junkets || []).length === 0 ? (
                             <span className="text-slate-500 italic">—</span>
                           ) : (
-                            <div className="flex flex-wrap gap-1 max-w-sm">
+                            <div
+                              className="flex flex-nowrap gap-1 w-[340px] max-w-[340px] overflow-hidden"
+                              title={g.junkets.map(junketChipLabel).join('\n')}
+                            >
                               {g.junkets.map((j) => (
                                 <JunketChip key={j.junket} j={j} />
                               ))}
                             </div>
                           )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono-num font-bold text-slate-200">
+                          {formatAmount(st.buy_in)}
                         </td>
                         <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono-num font-bold text-slate-100">
                           {formatAmount(st.rolling)}
@@ -959,10 +1075,6 @@ export default function GuestsPage() {
                         </td>
                         <td className={`py-2.5 px-3 text-right whitespace-nowrap font-mono-num font-bold ${wlTone(st.win_loss)}`}>
                           {formatAmount(st.win_loss)}
-                        </td>
-                        <td className="py-2.5 px-3 whitespace-nowrap text-slate-400">
-                          <div>{formatAgo(st.last_played)}</div>
-                          <div className="text-[11px] text-slate-500">{st.games} game{st.games === 1 ? '' : 's'}</div>
                         </td>
                         <td className="py-2.5 px-3 text-right whitespace-nowrap">
                           {rowActions(g)}
@@ -1077,6 +1189,28 @@ export default function GuestsPage() {
         title={viewingGuest ? viewingGuest.guest_name : ''}
         icon={Gamepad2}
         maxWidth="max-w-7xl"
+        headerActions={
+          viewingGuest ? (
+            <GuestActionsMenu
+              active={viewingGuest.active}
+              busy={rowBusy === viewingGuest.id}
+              onEdit={() => {
+                const g = viewingGuest;
+                setViewingGuest(null);
+                openEdit(g);
+              }}
+              onToggle={async () => {
+                await toggleActive(viewingGuest);
+                setViewingGuest((v) => (v ? { ...v, active: !v.active } : v));
+              }}
+              onDelete={() => {
+                const g = viewingGuest;
+                setViewingGuest(null);
+                setToDelete(g);
+              }}
+            />
+          ) : null
+        }
       >
         {viewingGuest ? (
           <div className="space-y-3 text-sm">
@@ -1099,8 +1233,10 @@ export default function GuestsPage() {
               ) : null}
             </div>
 
-            <div>
-              <span className="text-[11px] uppercase font-semibold text-slate-500 block mb-1">Accounts</span>
+            <section className="rounded-xl bg-slate-950/40 border border-slate-800 p-3">
+              <span className="text-[11px] uppercase font-semibold tracking-wider text-slate-500 block mb-2">
+                Accounts
+              </span>
               {(viewingGuest.junkets || []).length === 0 ? (
                 <span className="text-slate-500 text-sm italic">No junket accounts linked.</span>
               ) : (
@@ -1201,11 +1337,11 @@ export default function GuestsPage() {
                   })}
                 </div>
               )}
-            </div>
+            </section>
 
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <span className="text-[11px] uppercase font-semibold text-slate-500">
+            <section className="rounded-xl bg-slate-950/40 border border-slate-800 p-3">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="text-[11px] uppercase font-semibold tracking-wider text-slate-500">
                   Game Records{records.length ? ` · ${visibleRecords.length}` : ''}
                 </span>
                 {recordJunkets.length > 1 ? (
@@ -1220,7 +1356,7 @@ export default function GuestsPage() {
               </div>
 
               {/* Actions: equal-width row on phones, compact on desktop. */}
-              <div className="grid grid-cols-2 sm:flex sm:justify-end gap-1.5 mb-2">
+              <div className="grid grid-cols-2 sm:flex sm:justify-end gap-1.5 mb-3">
                 <CopyImageButton
                   makeImage={makeRecordsImage}
                   disabled={recordsLoading || visibleRecords.length === 0}
@@ -1235,10 +1371,7 @@ export default function GuestsPage() {
                   className="flex items-center justify-center gap-1.5 min-w-0 px-2 py-1.5 text-[13px] font-semibold rounded-md border transition cursor-pointer text-blue-300 hover:text-white bg-blue-500/10 hover:bg-blue-600 border-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Calculator className="w-4 h-4 shrink-0" />
-                  <span className="truncate">
-                    <span className="sm:hidden">Original data</span>
-                    <span className="hidden sm:inline">Original data</span>
-                  </span>
+                  <span className="truncate">Original data</span>
                 </button>
               </div>
 
@@ -1265,59 +1398,7 @@ export default function GuestsPage() {
                   totals={recordsTotals}
                 />
               )}
-            </div>
-
-            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const g = viewingGuest;
-                    setViewingGuest(null);
-                    openEdit(g);
-                  }}
-                  title="Edit"
-                  className={actionBtn}
-                >
-                  <Edit2 className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await toggleActive(viewingGuest);
-                    setViewingGuest((v) => (v ? { ...v, active: !v.active } : v));
-                  }}
-                  disabled={rowBusy === viewingGuest.id}
-                  title={viewingGuest.active ? 'Deactivate' : 'Activate'}
-                  className={actionBtn}
-                >
-                  {rowBusy === viewingGuest.id ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Power className={`w-3.5 h-3.5 ${viewingGuest.active ? 'text-emerald-400' : 'text-slate-500'}`} />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const g = viewingGuest;
-                    setViewingGuest(null);
-                    setToDelete(g);
-                  }}
-                  title="Delete"
-                  className="p-2 md:p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => setViewingGuest(null)}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-sm font-medium cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
+            </section>
           </div>
         ) : null}
       </Modal>

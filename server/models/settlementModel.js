@@ -383,6 +383,7 @@ export async function list({ limit = 100, q = '', junket = '', agentId = null } 
         s.ACCOUNT_NO LIKE :q
         OR s.ACCOUNT_NAME LIKE :q
         OR s.PLAYER_NAME LIKE :q
+        OR s.GUEST LIKE :q
         OR s.GAME_NO LIKE :q
         OR a.NAME LIKE :q
       )

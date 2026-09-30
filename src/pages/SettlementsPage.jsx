@@ -17,6 +17,11 @@ function formatWhen(value) {
   return `${datePart}, ${timePart}`;
 }
 
+// "SUNG NAKJIN" — shown in parentheses after the account no.
+function playerLabel(s) {
+  return [s.account_name, s.player_name].filter(Boolean).join(' · ');
+}
+
 function formatAmount(value) {
   if (value == null || value === '') return '—';
   const n = Number(value);
@@ -259,13 +264,12 @@ export default function SettlementsPage() {
           <table className="w-full text-left text-[11px] md:text-sm border-collapse">
             <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] md:text-[13px] font-bold tracking-wider border-b border-slate-800 select-none">
               <tr>
-                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">Date</th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">Game Start</th>
                 <th className="hidden md:table-cell py-2.5 px-2.5 whitespace-nowrap">Junket</th>
                 <th className="py-2 md:py-2.5 px-2 md:px-3 whitespace-nowrap">
                   <span className="md:hidden">Account</span>
-                  <span className="hidden md:inline">Account / Player</span>
+                  <span className="hidden md:inline">Account / Guest</span>
                 </th>
-                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">Agent</th>
                 <th className="md:hidden py-2 px-2 text-right whitespace-nowrap">In / Out</th>
                 <th className="md:hidden py-2 px-2 text-right whitespace-nowrap">Roll / Com</th>
                 <th className="hidden md:table-cell py-2.5 px-3 text-right whitespace-nowrap">Buy-in</th>
@@ -274,9 +278,10 @@ export default function SettlementsPage() {
                 <th className="hidden md:table-cell py-2.5 px-3 text-right whitespace-nowrap">Game Rate</th>
                 <th className="hidden md:table-cell py-2.5 px-3 text-right whitespace-nowrap">Commission</th>
                 <th className="py-2 md:py-2.5 px-2 md:px-3 text-right whitespace-nowrap">
-                  <span className="md:hidden">W/L</span>
+                  <span className="md:hidden">Win/Loss</span>
                   <span className="hidden md:inline">Win/Loss</span>
                 </th>
+                <th className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap">Game End</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
@@ -284,7 +289,7 @@ export default function SettlementsPage() {
                 return (
                 <tr key={s.id} className="hover:bg-slate-800/40 transition">
                   <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap font-mono-num text-sm leading-tight text-slate-200">
-                    {formatWhen(s.settled_at || s.created_at)}
+                    {formatWhen(s.game_start || s.settled_at || s.created_at)}
                   </td>
                   <td className="hidden md:table-cell py-2.5 px-2.5 whitespace-nowrap font-sans">
                     <span
@@ -295,10 +300,14 @@ export default function SettlementsPage() {
                       {s.junket}
                     </span>
                   </td>
-                  <td className="py-2 md:py-2.5 px-2 md:px-3 font-sans max-w-[130px] md:max-w-[220px]">
-                    <div className="flex items-center gap-1">
-                      <span className="font-bold text-white font-mono-num text-[12px] md:text-sm whitespace-nowrap">
-                        {s.account_no || '—'}
+                  <td className="py-2 md:py-2.5 px-2 md:px-3 font-sans max-w-[150px] md:max-w-[280px]">
+                    <div className="flex items-center gap-1 min-w-0">
+                      <span
+                        className="min-w-0 truncate font-mono-num text-[12px] md:text-sm"
+                        title={`${s.account_no || '—'}${playerLabel(s) ? ` (${playerLabel(s)})` : ''}`}
+                      >
+                        <span className="font-bold text-white">{s.account_no || '—'}</span>
+                        {playerLabel(s) ? <span className="text-slate-300"> ({playerLabel(s)})</span> : null}
                       </span>
                       <span
                         className={`md:hidden text-[8px] uppercase font-bold px-1 rounded-sm border ${
@@ -308,21 +317,14 @@ export default function SettlementsPage() {
                         {s.junket}
                       </span>
                     </div>
-                    <div className="text-[11px] md:text-[14px] text-slate-400 mt-0.5 truncate md:whitespace-normal md:break-words">
-                      {[s.account_name, s.player_name].filter(Boolean).join(' · ') || '—'}
-                    </div>
+                    {s.guest ? (
+                      <div className="text-[10px] md:text-[13px] text-sky-300/80 truncate mt-0.5" title={`Guest: ${s.guest}`}>
+                        <span className="text-slate-500">Guest:</span> {s.guest}
+                      </div>
+                    ) : null}
                     <div className="md:hidden text-[10px] text-slate-500 font-mono-num whitespace-nowrap">
-                      {formatWhen(s.settled_at || s.created_at)}
+                      {formatWhen(s.game_start || s.settled_at || s.created_at)}
                     </div>
-                  </td>
-                  <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap font-sans">
-                    {s.agent_name ? (
-                      <span className="font-medium text-slate-200">{s.agent_name}</span>
-                    ) : (
-                      <span className="text-[12px] uppercase font-semibold px-2 py-0.5 rounded border bg-amber-500/10 text-amber-300 border-amber-500/20">
-                        Unmatched
-                      </span>
-                    )}
                   </td>
                   <td className="md:hidden py-2 px-1.5 text-right whitespace-nowrap font-mono-num leading-snug">
                     <div className="font-bold text-slate-200">{formatAmount(s.buy_in)}</div>
@@ -354,6 +356,9 @@ export default function SettlementsPage() {
                   >
                     {formatAmount(s.win_loss)}
                   </td>
+                  <td className="hidden md:table-cell py-2.5 px-3 whitespace-nowrap font-mono-num text-sm text-slate-400">
+                    {formatWhen(s.settled_at)}
+                  </td>
                 </tr>
                 );
               })}
@@ -379,7 +384,7 @@ export default function SettlementsPage() {
                   </td>
                 </tr>
                 <tr className="hidden md:table-row border-t border-slate-800 bg-slate-950/70 font-bold">
-                  <td colSpan={4} className="py-3 px-3 text-slate-300">
+                  <td colSpan={3} className="py-3 px-3 text-slate-300">
                     Total
                   </td>
                   <td className="py-3 px-3 text-right text-slate-100">{formatAmount(totals.buy_in)}</td>
@@ -394,6 +399,7 @@ export default function SettlementsPage() {
                   >
                     {formatAmount(totals.win_loss)}
                   </td>
+                  <td className="py-3 px-3"></td>
                 </tr>
               </tfoot>
             ) : null}
