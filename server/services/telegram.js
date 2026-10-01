@@ -2,6 +2,7 @@ import { createWorker } from 'tesseract.js';
 import { config } from '../db.js';
 import * as agentModel from '../models/agentModel.js';
 import * as botConfigModel from '../models/botConfigModel.js';
+import { setApiKeys } from './apiKeys.js';
 import * as userModel from '../models/userModel.js';
 import { ingestMessage } from './ingest.js';
 import { extractBulkTableRows, looksLikeBulkReport, BULK_ROWS_MARKER } from './visionExtract.js';
@@ -407,6 +408,7 @@ export async function startTelegram() {
   try {
     const row = await botConfigModel.get();
     if (row?.bot_token) botToken = row.bot_token;
+    setApiKeys({ googleVision: row?.google_vision_api_key, anthropic: row?.anthropic_api_key });
   } catch (err) {
     console.error('[telegram] failed to load bot_config, using .env fallback', err.message || err);
   }
@@ -414,7 +416,7 @@ export async function startTelegram() {
   if (!botToken) {
     console.error(
       '[telegram] no bot token configured (bot_config table is empty and ' +
-        'TELEGRAM_BOT_TOKEN is unset) — set one on the Telegram API admin page.'
+        'TELEGRAM_BOT_TOKEN is unset) — set one on the Settings admin page.'
     );
     running = false;
     return;

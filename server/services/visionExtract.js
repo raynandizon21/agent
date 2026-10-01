@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { getAnthropicKey } from './apiKeys.js';
 
 // Prefix telegram.js puts on the resolved message text when Claude vision
 // successfully extracted this report — settlementParse.js checks for it
@@ -22,11 +23,16 @@ export function looksLikeBulkReport(text) {
 // instead of per-character matching, so it's used here as the primary
 // extractor for this one report shape; tesseract stays the OCR for every
 // other junket format since it already works fine there.
+// Re-created when the key changes (edited live on the Settings page).
 let client = null;
+let clientKey = '';
 function getClient() {
-  if (client) return client;
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  client = new Anthropic();
+  const apiKey = getAnthropicKey();
+  if (!apiKey) return null;
+  if (!client || clientKey !== apiKey) {
+    client = new Anthropic({ apiKey });
+    clientKey = apiKey;
+  }
   return client;
 }
 

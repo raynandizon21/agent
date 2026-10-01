@@ -1,4 +1,4 @@
-import { Bot, FileText, Gamepad2, Plane, Radio, ShieldCheck, UserCheck, Users } from 'lucide-react';
+import { FileText, Gamepad2, Plane, Radio, Settings, ShieldCheck, UserCheck, Users } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const NAV_ITEMS = [
@@ -9,7 +9,7 @@ const NAV_ITEMS = [
   { to: '/messages', end: false, label: 'Messages', icon: Radio, color: 'text-rose-400', adminOnly: true },
   { to: '/agents', end: false, label: 'Agents', icon: UserCheck, color: 'text-teal-400', adminOnly: true },
   { to: '/users', end: false, label: 'Users', icon: ShieldCheck, color: 'text-indigo-400', adminOnly: true },
-  { to: '/telegram', end: false, label: 'Telegram', icon: Bot, color: 'text-cyan-400', adminOnly: true },
+  { to: '/settings', end: false, label: 'Settings', icon: Settings, color: 'text-cyan-400', adminOnly: true },
 ];
 
 export default function Sidebar({ isAdmin }) {

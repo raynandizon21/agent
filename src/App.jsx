@@ -7,9 +7,9 @@ import AgentsPage from './pages/AgentsPage';
 import GuestsPage from './pages/GuestsPage';
 import InboxPage from './pages/InboxPage';
 import LoginPage from './pages/LoginPage';
+import SettingsPage from './pages/SettingsPage';
 import SettlementsPage from './pages/SettlementsPage';
 import StatementsPage from './pages/StatementsPage';
-import TelegramSettingsPage from './pages/TelegramSettingsPage';
 import TripDetailPage from './pages/TripDetailPage';
 import TripsPage from './pages/TripsPage';
 import UsersPage from './pages/UsersPage';
@@ -100,13 +100,15 @@ export default function App() {
             }
           />
           <Route
-            path="/telegram"
+            path="/settings"
             element={
               <AdminOnly>
-                <TelegramSettingsPage />
+                <SettingsPage />
               </AdminOnly>
             }
           />
+          {/* Old bookmark path, before this page was renamed to Settings. */}
+          <Route path="/telegram" element={<Navigate to="/settings" replace />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -1,5 +1,6 @@
 module.exports = {
   apps: [
+    // ── BACKEND ── Express API + Telegram bot + WebSocket (port 6000, from .env PORT)
     {
       name: 'Agent-System',
       script: 'server/index.js',
@@ -11,6 +12,7 @@ module.exports = {
         NODE_ENV: 'production',
       },
     },
+    // ── FRONTEND ── React dashboard served by Vite (port 6001)
     {
       name: 'Agent-System-Dashboard',
       script: 'node_modules/vite/bin/vite.js',

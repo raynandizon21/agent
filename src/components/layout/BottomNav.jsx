@@ -1,4 +1,4 @@
-import { Bot, FileText, Gamepad2, MoreHorizontal, Plane, Radio, ShieldCheck, UserCheck, Users } from 'lucide-react';
+import { FileText, Gamepad2, MoreHorizontal, Plane, Radio, Settings, ShieldCheck, UserCheck, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 
@@ -12,7 +12,7 @@ const NAV_ITEMS = [
   { to: '/messages', end: false, label: 'Messages', icon: Radio, color: 'text-rose-400', pill: 'bg-rose-500/15 border-rose-500/40', adminOnly: true },
   { to: '/agents', end: false, label: 'Agents', icon: UserCheck, color: 'text-teal-400', pill: 'bg-teal-500/15 border-teal-500/40', adminOnly: true },
   { to: '/users', end: false, label: 'Users', icon: ShieldCheck, color: 'text-indigo-400', pill: 'bg-indigo-500/15 border-indigo-500/40', adminOnly: true },
-  { to: '/telegram', end: false, label: 'Telegram', icon: Bot, color: 'text-cyan-400', pill: 'bg-cyan-500/15 border-cyan-500/40', adminOnly: true },
+  { to: '/settings', end: false, label: 'Settings', icon: Settings, color: 'text-cyan-400', pill: 'bg-cyan-500/15 border-cyan-500/40', adminOnly: true },
 ];
 
 // Tabs that fit the bar before the rest collapse into a "More" sheet.

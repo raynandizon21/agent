@@ -55,7 +55,11 @@ async function main() {
   await agentModel.ensureTable();
   await guestModel.ensureTable();
   await tripModel.ensureTable();
-  await botConfigModel.ensureTable({ botToken: config.telegramBotToken });
+  await botConfigModel.ensureTable({
+    botToken: config.telegramBotToken,
+    googleVisionKey: process.env.GOOGLE_CLOUD_VISION_API_KEY || '',
+    anthropicKey: process.env.ANTHROPIC_API_KEY || '',
+  });
   await userModel.ensureTable();
   await messageModel.ensureTable();
   await settlementModel.ensureTable();

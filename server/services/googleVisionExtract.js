@@ -1,3 +1,5 @@
+import { getGoogleVisionKey } from './apiKeys.js';
+
 // Google Cloud Vision fallback for Infinity Cage's bulk daily-report
 // screenshot — same problem visionExtract.js (Claude) solves, different
 // provider. Unlike Claude, this is still character-level OCR (no semantic
@@ -75,7 +77,7 @@ function reconstructRowOrder(fullTextAnnotation) {
 // the request fails, or the response has no usable word-level data —
 // callers fall back to whatever OCR text they already have.
 export async function extractText(imageBuffer) {
-  const apiKey = process.env.GOOGLE_CLOUD_VISION_API_KEY;
+  const apiKey = getGoogleVisionKey();
   if (!apiKey) return null;
 
   try {
