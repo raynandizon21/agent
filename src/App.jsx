@@ -4,6 +4,7 @@ import BottomNav from './components/layout/BottomNav';
 import Navbar from './components/layout/Navbar';
 import Sidebar from './components/layout/Sidebar';
 import AgentsPage from './pages/AgentsPage';
+import DashboardPage from './pages/DashboardPage';
 import GuestsPage from './pages/GuestsPage';
 import InboxPage from './pages/InboxPage';
 import LoginPage from './pages/LoginPage';
@@ -78,6 +79,7 @@ export default function App() {
               </AdminOnly>
             }
           />
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/settlements" element={<Navigate to="/" replace />} />
           <Route
             path="/agents"

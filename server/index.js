@@ -9,6 +9,7 @@ import * as guestModel from './models/guestModel.js';
 import * as messageModel from './models/messageModel.js';
 import * as settlementModel from './models/settlementModel.js';
 import * as tripModel from './models/tripModel.js';
+import * as expenseModel from './models/expenseModel.js';
 import * as userModel from './models/userModel.js';
 import routes from './routes/index.js';
 import { attachRealtime } from './realtime.js';
@@ -55,6 +56,7 @@ async function main() {
   await agentModel.ensureTable();
   await guestModel.ensureTable();
   await tripModel.ensureTable();
+  await expenseModel.ensureTable();
   await botConfigModel.ensureTable({
     botToken: config.telegramBotToken,
     googleVisionKey: process.env.GOOGLE_CLOUD_VISION_API_KEY || '',

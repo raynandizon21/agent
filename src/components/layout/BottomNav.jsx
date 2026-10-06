@@ -1,10 +1,11 @@
-import { FileText, Gamepad2, MoreHorizontal, Plane, Radio, Settings, ShieldCheck, UserCheck, Users } from 'lucide-react';
+import { FileText, LayoutDashboard, Gamepad2, MoreHorizontal, Plane, Radio, Settings, ShieldCheck, UserCheck, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 
 // `color` tints each icon so tabs are recognisable at a glance — kept in sync
 // with Sidebar.jsx. `pill` is the matching tint for the selected-tab shape.
 const NAV_ITEMS = [
+  { to: '/dashboard', end: false, label: 'Dashboard', icon: LayoutDashboard, color: 'text-blue-400', pill: 'bg-blue-500/15 border-blue-500/40', adminOnly: false },
   { to: '/', end: true, label: 'Settlements', icon: Gamepad2, color: 'text-amber-400', pill: 'bg-amber-500/15 border-amber-500/40', adminOnly: false },
   { to: '/trips', end: false, label: 'Trips', icon: Plane, color: 'text-sky-400', pill: 'bg-sky-500/15 border-sky-500/40', adminOnly: false },
   { to: '/guests', end: false, label: 'Guests', icon: Users, color: 'text-violet-400', pill: 'bg-violet-500/15 border-violet-500/40', adminOnly: false },

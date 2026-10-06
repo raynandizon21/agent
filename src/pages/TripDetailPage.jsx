@@ -267,7 +267,7 @@ function nowLocal() {
   return `${toDateStr(d)}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function ExchangeTab({ tripId, exchanges, onChanged }) {
+export function ExchangeTab({ tripId, exchanges, onChanged }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);

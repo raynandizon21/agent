@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { telegramWebhookHandler } from '../services/telegram.js';
 import authRoutes from './authRoutes.js';
 import agentRoutes from './agentRoutes.js';
+import expenseRoutes from './expenseRoutes.js';
 import guestRoutes from './guestRoutes.js';
 import messageRoutes from './messageRoutes.js';
 import settlementRoutes from './settlementRoutes.js';
@@ -16,6 +17,7 @@ router.post('/telegram/webhook', telegramWebhookHandler);
 
 router.use('/auth', authRoutes);
 router.use('/agents', agentRoutes);
+router.use('/expenses', expenseRoutes);
 router.use('/guests', guestRoutes);
 router.use('/messages', messageRoutes);
 router.use('/settlements', settlementRoutes);

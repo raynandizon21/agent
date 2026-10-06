@@ -1,7 +1,8 @@
-import { FileText, Gamepad2, Plane, Radio, Settings, ShieldCheck, UserCheck, Users } from 'lucide-react';
+import { FileText, LayoutDashboard, Gamepad2, Plane, Radio, Settings, ShieldCheck, UserCheck, Users } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const NAV_ITEMS = [
+  { to: '/dashboard', end: false, label: 'Dashboard', icon: LayoutDashboard, color: 'text-blue-400', adminOnly: false },
   { to: '/', end: true, label: 'Settlements', icon: Gamepad2, color: 'text-amber-400', adminOnly: false },
   { to: '/trips', end: false, label: 'Trips', icon: Plane, color: 'text-sky-400', adminOnly: false },
   { to: '/guests', end: false, label: 'Guests', icon: Users, color: 'text-violet-400', adminOnly: false },
