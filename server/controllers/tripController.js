@@ -1,10 +1,10 @@
+import { parseExchange } from './exchangeController.js';
 import * as guestModel from '../models/guestModel.js';
 import * as settlementModel from '../models/settlementModel.js';
 import * as tripModel from '../models/tripModel.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
-const CURRENCY_RE = /^[A-Z]{3}$/;
+const BOOKING_TYPES = ['trip', 'hotel', 'hybrid'];
 
 function optionalText(value, max) {
   if (value == null) return null;
@@ -47,19 +47,32 @@ async function cleanTripBody(req) {
   if (ownerId === undefined) return { error: 'Guest not found', status: 404 };
   if (!canAccessGuest(req, ownerId)) return { error: 'Not your guest', status: 403 };
 
-  if (!DATE_RE.test(b.arrival_date || '')) return { error: 'arrival_date required (YYYY-MM-DD)' };
-  if (!DATE_RE.test(b.departure_date || '')) return { error: 'departure_date required (YYYY-MM-DD)' };
-  if (b.departure_date < b.arrival_date) return { error: 'Departure date is before arrival date' };
+  // Flexible: arrival only, departure only, or both — at least one.
+  const arrivalDate = b.arrival_date ? String(b.arrival_date) : null;
+  const departureDate = b.departure_date ? String(b.departure_date) : null;
+  if (!arrivalDate && !departureDate) return { error: 'Pick an arrival or departure date' };
+  if (arrivalDate && !DATE_RE.test(arrivalDate)) return { error: 'arrival_date must be YYYY-MM-DD' };
+  if (departureDate && !DATE_RE.test(departureDate)) return { error: 'departure_date must be YYYY-MM-DD' };
+  if (arrivalDate && departureDate && departureDate < arrivalDate) return { error: 'Departure date is before arrival date' };
+
+  // 'trip' = flights only, 'hotel' = hotel booking only, 'hybrid' = both.
+  // Fields that don't belong to the chosen type are cleared.
+  const bookingType = BOOKING_TYPES.includes(b.booking_type) ? b.booking_type : 'hybrid';
+  const hasFlights = bookingType !== 'hotel';
+  const hasHotel = bookingType !== 'trip';
+  const hotel = hasHotel ? optionalText(b.hotel, 120) : null;
+  if (bookingType === 'hotel' && !hotel) return { error: 'Hotel name required for a hotel booking' };
 
   return {
     fields: {
       guestId,
-      arrivalDate: b.arrival_date,
-      departureDate: b.departure_date,
-      arrivalFlight: optionalText(b.arrival_flight, 32)?.toUpperCase() ?? null,
-      departureFlight: optionalText(b.departure_flight, 32)?.toUpperCase() ?? null,
-      hotel: optionalText(b.hotel, 120),
-      roomNo: optionalText(b.room_no, 32),
+      bookingType,
+      arrivalDate,
+      departureDate,
+      arrivalFlight: hasFlights ? optionalText(b.arrival_flight, 32)?.toUpperCase() ?? null : null,
+      departureFlight: hasFlights ? optionalText(b.departure_flight, 32)?.toUpperCase() ?? null : null,
+      hotel,
+      roomNo: hasHotel ? optionalText(b.room_no, 32) : null,
       notes: optionalText(b.notes, 500),
     },
   };
@@ -171,38 +184,13 @@ export async function addExchange(req, res) {
     const trip = await loadAuthorizedTrip(req, res);
     if (!trip) return;
 
-    const b = req.body || {};
-    const fromCurrency = String(b.from_currency || '').trim().toUpperCase();
-    const toCurrency = String(b.to_currency || '').trim().toUpperCase();
-    const fromAmount = Number(b.from_amount);
-    const toAmount = Number(b.to_amount);
-    const rate = b.rate == null || b.rate === '' ? null : Number(b.rate);
-
-    if (!DATETIME_RE.test(b.exchange_dt || '')) {
-      return res.status(400).json({ error: 'exchange_dt required (YYYY-MM-DDTHH:mm)' });
-    }
-    if (!CURRENCY_RE.test(fromCurrency) || !CURRENCY_RE.test(toCurrency)) {
-      return res.status(400).json({ error: 'Currencies must be 3-letter codes' });
-    }
-    if (fromCurrency === toCurrency) {
-      return res.status(400).json({ error: 'From and To currency are the same' });
-    }
-    if (!(fromAmount > 0) || !(toAmount > 0)) {
-      return res.status(400).json({ error: 'Amounts must be greater than 0' });
-    }
-    if (rate != null && !(rate > 0)) {
-      return res.status(400).json({ error: 'Rate must be greater than 0' });
-    }
+    const parsed = parseExchange(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
 
     const result = await tripModel.createExchange({
+      ...parsed.fields,
+      guestId: trip.guest_id,
       tripId: trip.id,
-      exchangeDt: `${b.exchange_dt.replace('T', ' ')}:00`,
-      fromCurrency,
-      fromAmount,
-      toCurrency,
-      toAmount,
-      rate,
-      notes: optionalText(b.notes, 255),
       encodedBy: req.user.username,
     });
     return res.status(201).json({ id: result.insertId });

@@ -444,6 +444,7 @@ export default function DashboardPage() {
               trips={trips}
               periodLabel={periodLabel}
               onShowAllTime={period !== 'all' && inPeriod.length === 0 && settled.length > 0 ? () => choosePeriod('all') : null}
+              onTripsChanged={load}
             />
 
             <div className="space-y-3 sm:space-y-4">

@@ -237,9 +237,10 @@ export default function TripsPage() {
       <TripFormModal
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        onSaved={(id) => {
+        onSaved={() => {
+          // Stay on the board; the new trip shows up in its tab.
           setFormOpen(false);
-          navigate(`/trips/${id}`);
+          load();
         }}
       />
     </div>

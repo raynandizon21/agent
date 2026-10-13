@@ -6,6 +6,14 @@ export const TRIP_STATUSES = [
   { value: 'finished', label: 'Finished', dot: 'bg-orange-400', active: 'bg-orange-500/15 text-orange-300 border-orange-500/40', badge: 'bg-orange-500/15 text-orange-300 border-orange-500/30' },
 ];
 
+// What a schedule entry is — flights only, a hotel booking only, or both.
+export const BOOKING_TYPES = [
+  { value: 'trip', label: 'Trip', long: 'Trip (flights)' },
+  { value: 'hotel', label: 'Hotel', long: 'Hotel booking' },
+  { value: 'hybrid', label: 'Trip + Hotel', long: 'Trip + Hotel' },
+];
+export const bookingType = (t) => BOOKING_TYPES.find((b) => b.value === t?.booking_type) || BOOKING_TYPES[2];
+
 export const JUNKET_LABELS = {
   win9: 'Win9',
   galaxy: 'Galaxy',

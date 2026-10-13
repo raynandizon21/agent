@@ -118,21 +118,20 @@ export default function LoginPage() {
           {busy ? 'Signing in…' : 'Sign In'}
         </button>
 
-        <div className="flex justify-center gap-4 border-t border-slate-800 mt-10 pt-6 text-xs text-slate-500">
+        <div className="grid grid-cols-2 gap-3 border-t border-slate-800 mt-10 pt-6">
           <button
             type="button"
             disabled={busy}
             onClick={() => doLogin('admin', '123')}
-            className="hover:text-slate-300 transition cursor-pointer disabled:opacity-55"
+            className="py-3 rounded-xl text-sm font-bold text-indigo-200 bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-400/40 transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
           >
             Quick log in (Admin)
           </button>
-          <span>·</span>
           <button
             type="button"
             disabled={busy}
             onClick={() => doLogin('raynan', '12348765')}
-            className="hover:text-slate-300 transition cursor-pointer disabled:opacity-55"
+            className="py-3 rounded-xl text-sm font-bold text-emerald-200 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 transition cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
           >
             Quick log in (Agent)
           </button>

@@ -45,7 +45,7 @@ const TABS = [
   { value: 'analysis', label: 'Analysis', icon: BarChart3 },
 ];
 
-const CURRENCIES = ['PHP', 'KRW', 'USD', 'CNY', 'HKD', 'JPY', 'SGD', 'TWD', 'THB', 'VND'];
+const CURRENCIES = ['PHP', 'KRW', 'USD', 'JPY', 'CNY'];
 const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c, label: c }));
 
 const inputCls =
@@ -267,7 +267,7 @@ function nowLocal() {
   return `${toDateStr(d)}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export function ExchangeTab({ tripId, exchanges, onChanged }) {
+function ExchangeTab({ tripId, exchanges, onChanged }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
