@@ -9,14 +9,13 @@ import {
   Loader2,
   PlaneLanding,
   PlaneTakeoff,
-  Plus,
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import ConfirmDialog from '../ConfirmDialog';
-import Select from '../components/common/Select';
+import ExchangeForm, { blankExchange, fieldCls as exchangeFieldCls } from '../components/common/ExchangeForm';
 import TripFormModal from '../components/trips/TripFormModal';
 import { effectiveCommission, effectiveRate } from '../lib/commission';
 import {
@@ -44,12 +43,6 @@ const TABS = [
   { value: 'exchange', label: 'Exchange', icon: ArrowRightLeft },
   { value: 'analysis', label: 'Analysis', icon: BarChart3 },
 ];
-
-const CURRENCIES = ['PHP', 'KRW', 'USD', 'JPY', 'CNY'];
-const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c, label: c }));
-
-const inputCls =
-  'w-full bg-slate-950 border border-slate-800 focus:border-blue-500/60 rounded-lg px-3 py-2.5 text-base sm:text-sm text-slate-100 outline-none placeholder:text-slate-500';
 
 function winLossCls(n) {
   if (n == null || Number(n) === 0) return 'text-slate-300';
@@ -268,40 +261,24 @@ function nowLocal() {
 }
 
 function ExchangeTab({ tripId, exchanges, onChanged }) {
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState(null);
+  const [form, setForm] = useState(blankExchange);
+  // Kept editable here (unlike the dashboard popup, which stamps "now") so
+  // an exchange can be logged on the right day of a trip after the fact.
+  const [exchangeDt, setExchangeDt] = useState(nowLocal);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [toDelete, setToDelete] = useState(null);
 
-  function startAdd() {
-    setForm({ exchange_dt: nowLocal(), from_currency: 'KRW', from_amount: '', to_currency: 'PHP', rate: '', to_amount: '', notes: '' });
-    setError('');
-    setOpen(true);
-  }
-
-  function set(key, value) {
-    setForm((f) => {
-      const next = { ...f, [key]: value };
-      // Amount × rate fills "receive" automatically; typing "receive"
-      // directly back-fills the rate instead, so either can be the input.
-      const from = Number(next.from_amount);
-      if ((key === 'from_amount' || key === 'rate') && from > 0 && Number(next.rate) > 0) {
-        next.to_amount = String(Math.round(from * Number(next.rate) * 100) / 100);
-      } else if (key === 'to_amount' && from > 0 && Number(value) > 0) {
-        next.rate = String(Math.round((Number(value) / from) * 1e6) / 1e6);
-      }
-      return next;
-    });
-  }
-
-  async function submit(e) {
-    e.preventDefault();
+  async function submit(rate) {
     setBusy(true);
     setError('');
     try {
-      await api(`/trips/${tripId}/exchanges`, { method: 'POST', body: JSON.stringify(form) });
-      setOpen(false);
+      await api(`/trips/${tripId}/exchanges`, {
+        method: 'POST',
+        body: JSON.stringify({ ...form, rate: rate ?? '', exchange_dt: exchangeDt }),
+      });
+      setForm((f) => ({ ...blankExchange(), from_currency: f.from_currency, to_currency: f.to_currency }));
+      setExchangeDt(nowLocal());
       onChanged();
     } catch (err) {
       setError(err.message);
@@ -325,38 +302,17 @@ function ExchangeTab({ tripId, exchanges, onChanged }) {
 
   return (
     <div className="space-y-3">
-      {!open ? (
-        <button
-          type="button"
-          onClick={startAdd}
-          className="w-full py-2.5 rounded-xl border border-dashed border-slate-700 text-sm font-semibold text-blue-300 hover:bg-slate-900 flex items-center justify-center gap-1.5 cursor-pointer"
-        >
-          <Plus className="w-4 h-4" /> Add exchange
-        </button>
-      ) : (
-        <form onSubmit={submit} className="bg-slate-900/70 border border-slate-800 rounded-xl p-3 space-y-2.5">
-          <input type="datetime-local" className={inputCls} value={form.exchange_dt} onChange={(e) => set('exchange_dt', e.target.value)} />
-          <div className="grid grid-cols-[88px_1fr] gap-2">
-            <Select className={inputCls} value={form.from_currency} onChange={(c) => set('from_currency', c)} options={CURRENCY_OPTIONS} />
-            <input inputMode="decimal" className={`${inputCls} font-mono-num`} placeholder="Give amount" value={form.from_amount} onChange={(e) => set('from_amount', e.target.value)} />
-          </div>
-          <input inputMode="decimal" className={`${inputCls} font-mono-num`} placeholder={`Rate (1 ${form.from_currency} = ? ${form.to_currency})`} value={form.rate} onChange={(e) => set('rate', e.target.value)} />
-          <div className="grid grid-cols-[88px_1fr] gap-2">
-            <Select className={inputCls} value={form.to_currency} onChange={(c) => set('to_currency', c)} options={CURRENCY_OPTIONS} />
-            <input inputMode="decimal" className={`${inputCls} font-mono-num`} placeholder="Receive amount" value={form.to_amount} onChange={(e) => set('to_amount', e.target.value)} />
-          </div>
-          <input className={inputCls} placeholder="Notes (optional)" value={form.notes} onChange={(e) => set('notes', e.target.value)} />
-          {error ? <p className="text-sm text-rose-400">{error}</p> : null}
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setOpen(false)} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-slate-300 bg-slate-800 cursor-pointer">
-              Cancel
-            </button>
-            <button type="submit" disabled={busy} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 cursor-pointer">
-              {busy ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </form>
-      )}
+      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3">
+        <ExchangeForm form={form} setForm={setForm} busy={busy} error={error} onSubmit={submit}>
+          <input
+            type="datetime-local"
+            aria-label="Exchange date and time"
+            className={exchangeFieldCls}
+            value={exchangeDt}
+            onChange={(e) => setExchangeDt(e.target.value)}
+          />
+        </ExchangeForm>
+      </div>
 
       {exchanges.length === 0 ? (
         <Empty>No money exchanges logged for this trip.</Empty>
